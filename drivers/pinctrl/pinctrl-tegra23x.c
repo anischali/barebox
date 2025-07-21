@@ -28,12 +28,12 @@ struct pinctrl_tegra23x {
 struct tegra_pingroup {
 	const char *name;
 	const char *funcs[4];
-	u16 reg;
+	u32 reg;
 };
 
 struct tegra_drive_pingroup {
 	const char *name;
-	u16 reg;
+	u32 reg;
 	u32 drvdn_bit:5;
 	u32 drvup_bit:5;
 	u32 slwr_bit:5;
@@ -520,7 +520,7 @@ static int pinctrl_tegra23x_set_drvstate(struct pinctrl_tegra23x *ctrl,
 {
 	const char *pins = NULL;
 	const struct tegra_drive_pingroup *group = NULL;
-	int hsm = -1, schmitt = -1, pds = -1, pus = -1, srr = -1, srf = -1;
+	int schmitt = -1, pds = -1, pus = -1, srr = -1, srf = -1;
 	int i;
 	u32 __iomem *regaddr;
 	u32 val;
@@ -540,47 +540,40 @@ static int pinctrl_tegra23x_set_drvstate(struct pinctrl_tegra23x *ctrl,
 
 	regaddr = ctrl->regs.ctrl + (group->reg >> 2);
 
-	of_property_read_u32_array(np, "nvidia,high-speed-mode", &hsm, 1);
 	of_property_read_u32_array(np, "nvidia,schmitt", &schmitt, 1);
 	of_property_read_u32_array(np, "nvidia,pull-down-strength", &pds, 1);
 	of_property_read_u32_array(np, "nvidia,pull-up-strength", &pus, 1);
 	of_property_read_u32_array(np, "nvidia,slew-rate-rising", &srr, 1);
 	of_property_read_u32_array(np, "nvidia,slew-rate-falling", &srf, 1);
 
-	if (hsm >= 0) {
-		val = readl(regaddr);
-		val &= ~(0x1 << group->hsm_bit);
-		val |= hsm << group->hsm_bit;
-		writel(val, regaddr);
-	}
 	if (schmitt >= 0) {
 		val = readl(regaddr);
 		val &= ~(0x1 << group->schmitt_bit);
-		val |= hsm << group->schmitt_bit;
+		val |= schmitt << group->schmitt_bit;
 		writel(val, regaddr);
 	}
 	if (pds >= 0) {
 		val = readl(regaddr);
 		val &= ~(((1 << group->drvdn_width) - 1) << group->drvdn_bit);
-		val |= hsm << group->drvdn_bit;
+		val |= pds << group->drvdn_bit;
 		writel(val, regaddr);
 	}
 	if (pus >= 0) {
 		val = readl(regaddr);
 		val &= ~(((1 << group->drvup_width) - 1) << group->drvup_bit);
-		val |= hsm << group->drvup_bit;
+		val |= pus << group->drvup_bit;
 		writel(val, regaddr);
 	}
 	if (srr >= 0) {
 		val = readl(regaddr);
 		val &= ~(((1 << group->slwr_width) - 1) << group->slwr_bit);
-		val |= hsm << group->slwr_bit;
+		val |= srr << group->slwr_bit;
 		writel(val, regaddr);
 	}
 	if (srf >= 0) {
 		val = readl(regaddr);
 		val &= ~(((1 << group->slwf_width) - 1) << group->slwf_bit);
-		val |= hsm << group->slwf_bit;
+		val |= srf << group->slwf_bit;
 		writel(val, regaddr);
 	}
 
@@ -741,7 +734,7 @@ static int pinctrl_tegra23x_set_state(struct pinctrl_device *pdev,
 }
 
 static struct pinctrl_ops pinctrl_tegra23x_ops = {
-	.set_state = pinctrl_tegra23x_set_drvstate,
+	.set_state = pinctrl_tegra23x_set_state,
 };
 
 static int pinctrl_tegra23x_probe(struct device *dev)

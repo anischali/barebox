@@ -35,6 +35,8 @@
 /* location of the BCT in IRAM */
 #define NV_BIT_BCTPTR_T20	0x3c
 #define NV_BIT_BCTPTR_T114	0x4c
+#warning "need to find the bctptr"
+#define NV_BIT_BCTPTR_T234	0x4c
 
 /* ODM data */
 #define BCT_ODMDATA_OFFSET	12	/* offset from the _end_ of the BCT */
@@ -42,6 +44,7 @@
 #define T20_ODMDATA_RAMSIZE_SHIFT	28
 #define T20_ODMDATA_RAMSIZE_MASK	(3 << T20_ODMDATA_RAMSIZE_SHIFT)
 #define T30_ODMDATA_RAMSIZE_MASK	(0xf << T20_ODMDATA_RAMSIZE_SHIFT)
+#define T23_ODMDATA_RAMSIZE_MASK	(0xf << T20_ODMDATA_RAMSIZE_SHIFT)
 #define T20_ODMDATA_UARTTYPE_SHIFT	18
 #define T20_ODMDATA_UARTTYPE_MASK	(3 << T20_ODMDATA_UARTTYPE_SHIFT)
 #define T20_ODMDATA_UARTID_SHIFT	15
@@ -58,6 +61,7 @@ enum tegra_chiptype {
 	TEGRA30 = 1,
 	TEGRA114 = 2,
 	TEGRA124 = 3,
+	TEGRA234 = 4,
 };
 
 static __always_inline
@@ -80,6 +84,9 @@ enum tegra_chiptype tegra_get_chiptype(void)
 		return TEGRA30;
 	case 0x40:
 		return TEGRA124;
+	case 0x45:
+	#warning "find the value indicating chip type of tegra234"
+		return TEGRA234;
 	default:
 		return TEGRA_UNK_REV;
 	}
@@ -108,6 +115,10 @@ u32 tegra_get_odmdata(void)
 		bctptr_offset = NV_BIT_BCTPTR_T114;
 		odmdata_offset = 1704;
 		break;
+	case TEGRA234:
+		bctptr_offset = NV_BIT_BCTPTR_T234;
+		odmdata_offset = 1704;
+		break;
 	default:
 		return 0;
 	}
@@ -126,6 +137,9 @@ int tegra_get_num_cores(void)
 	case TEGRA30:
 	case TEGRA124:
 		return 4;
+	case TEGRA234:
+	#warning "find number of tegra 234"
+		return 8;
 	default:
 		return 0;
 	}
@@ -174,6 +188,22 @@ uint32_t tegra30_get_ramsize(void)
 		return SZ_1G;
 	case 8:
 		return SZ_2G - SZ_1M;
+	}
+}
+
+static __always_inline
+uint32_t tegra234_get_ramsize(void)
+{
+	switch ((tegra_get_odmdata() & T23_ODMDATA_RAMSIZE_MASK) >>
+			T20_ODMDATA_RAMSIZE_SHIFT) {
+	case 0:
+	case 1:
+	default:
+		return SZ_4G;
+	case 2:
+		return SZ_8G;
+	case 3:
+		return SZ_16G;
 	}
 }
 

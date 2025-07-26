@@ -47,6 +47,8 @@ void tegra_maincomplex_entry(char *fdt)
 		/* Cortex A9 r2p9 */
 		enable_arm_errata_743622_war();
 		enable_arm_errata_751472_war();
+	case TEGRA234:
+		#warning "see weither there is erratas to enable for T234"
 		break;
 	default:
 		break;
@@ -77,6 +79,9 @@ void tegra_maincomplex_entry(char *fdt)
 	case TEGRA124:
 		rambase = SZ_2G;
 		ramsize = tegra30_get_ramsize();
+	case TEGRA234:
+		rambase = SZ_2G;
+		ramsize = tegra234_get_ramsize();
 		break;
 	default:
 		/* If we don't know the chiptype, better bail out */

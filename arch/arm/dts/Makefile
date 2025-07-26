@@ -52,6 +52,9 @@ lwl-$(CONFIG_MACH_NITROGEN6) += imx6q-nitrogen6x.dtb.o imx6dl-nitrogen6x.dtb.o i
 lwl-$(CONFIG_MACH_NOVENA) += imx6q-novena.dtb.o
 lwl-$(CONFIG_MACH_NVIDIA_BEAVER) += tegra30-beaver.dtb.o
 lwl-$(CONFIG_MACH_NVIDIA_JETSON) += tegra124-jetson-tk1.dtb.o
+lwl-$(CONFIG_MACH_NVIDIA_JETSON_234) += tegra234-p3737-0000+p3701-0000.dtb.o tegra234-p3737-0000+p3701-0008.dtb.o \
+	tegra234-p3740-0002+p3701-0008.dtb.o tegra234-p3768-0000+p3767-0000.dtb.o tegra234-p3768-0000+p3767-0005.dtb.o \
+	tegra234-sim-vdk.dtb.o
 lwl-$(CONFIG_MACH_PCA100) += imx27-phytec-phycard-s-rdk-bb.dtb.o
 lwl-$(CONFIG_MACH_PCM038) += imx27-phytec-phycore-rdk.dtb.o
 lwl-$(CONFIG_MACH_PHYTEC_SOM_AM335X) += am335x-phytec-phyflex-som.dtb.o am335x-phytec-phyflex-som-mlo.dtb.o \

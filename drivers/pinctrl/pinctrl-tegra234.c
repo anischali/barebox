@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Pinctrl data for the NVIDIA tegra23x pinmux
+ * Pinctrl data for the NVIDIA tegra234 pinmux
  * implemented from linux pinctrl-tegra234
  *
  * Copyright (c) 2025 Anis Chali <anis.chali@ametek.com>
@@ -14,15 +14,15 @@
 #include <linux/err.h>
 
 
-struct pinctrl_tegra23x_drvdata;
+struct pinctrl_tegra234_drvdata;
 
-struct pinctrl_tegra23x {
+struct pinctrl_tegra234 {
 	struct {
 		u32 __iomem *ctrl;
 		u32 __iomem *mux;
 	} regs;
 	struct pinctrl_device pinctrl;
-	const struct pinctrl_tegra23x_drvdata *drvdata;
+	const struct pinctrl_tegra234_drvdata *drvdata;
 };
 
 struct tegra_pingroup {
@@ -46,7 +46,7 @@ struct tegra_drive_pingroup {
 	u32 slwf_width:6;
 };
 
-struct pinctrl_tegra23x_drvdata {
+struct pinctrl_tegra234_drvdata {
 	const struct tegra_pingroup *pingrps;
 	const unsigned int num_pingrps;
 	const struct tegra_drive_pingroup *drvgrps;
@@ -431,7 +431,7 @@ static const struct tegra_drive_pingroup tegra234_drive_groups[] = {
 	DRV_PG(sdmmc1_comp, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1)
 };
 
-__maybe_unused static const struct pinctrl_tegra23x_drvdata tegra234_drvdata = {
+__maybe_unused static const struct pinctrl_tegra234_drvdata tegra234_drvdata = {
 	.pingrps = tegra234_pin_groups,
 	.num_pingrps = ARRAY_SIZE(tegra234_pin_groups),
 	.drvgrps = tegra234_drive_groups,
@@ -508,14 +508,14 @@ static const struct tegra_drive_pingroup tegra234_aon_drive_groups[] = {
 	DRV_PG(hdmi_cec_pgg0, 0x1064,	12,	5,	20,	5,	-1,	-1,	-1,	-1, 12)
 };
 
-__maybe_unused static const struct pinctrl_tegra23x_drvdata tegra124_aon_drvdata = {
+__maybe_unused static const struct pinctrl_tegra234_drvdata tegra124_aon_drvdata = {
 	.pingrps = tegra234_aon_groups,
 	.num_pingrps = ARRAY_SIZE(tegra234_aon_groups),
 	.drvgrps = tegra234_aon_drive_groups,
 	.num_drvgrps = ARRAY_SIZE(tegra234_aon_drive_groups),
 };
 
-static int pinctrl_tegra23x_set_drvstate(struct pinctrl_tegra23x *ctrl,
+static int pinctrl_tegra234_set_drvstate(struct pinctrl_tegra234 *ctrl,
                                         struct device_node *np)
 {
 	const char *pins = NULL;
@@ -580,7 +580,7 @@ static int pinctrl_tegra23x_set_drvstate(struct pinctrl_tegra23x *ctrl,
 	return 1;
 }
 
-static void pinctrl_tegra23x_set_func(struct pinctrl_tegra23x *ctrl,
+static void pinctrl_tegra234_set_func(struct pinctrl_tegra234 *ctrl,
 				     u32 reg, int func)
 {
 	u32 __iomem *regaddr = ctrl->regs.mux + (reg >> 2);
@@ -592,7 +592,7 @@ static void pinctrl_tegra23x_set_func(struct pinctrl_tegra23x *ctrl,
 	writel(val, regaddr);
 }
 
-static void pinctrl_tegra23x_set_pull(struct pinctrl_tegra23x *ctrl,
+static void pinctrl_tegra234_set_pull(struct pinctrl_tegra234 *ctrl,
 				     u32 reg, int pull)
 {
 	u32 __iomem *regaddr = ctrl->regs.mux + (reg >> 2);
@@ -604,7 +604,7 @@ static void pinctrl_tegra23x_set_pull(struct pinctrl_tegra23x *ctrl,
 	writel(val, regaddr);
 }
 
-static void pinctrl_tegra23x_set_input(struct pinctrl_tegra23x *ctrl,
+static void pinctrl_tegra234_set_input(struct pinctrl_tegra234 *ctrl,
 				      u32 reg, int input)
 {
 	u32 __iomem *regaddr = ctrl->regs.mux + (reg >> 2);
@@ -616,7 +616,7 @@ static void pinctrl_tegra23x_set_input(struct pinctrl_tegra23x *ctrl,
 	writel(val, regaddr);
 }
 
-static void pinctrl_tegra23x_set_tristate(struct pinctrl_tegra23x *ctrl,
+static void pinctrl_tegra234_set_tristate(struct pinctrl_tegra234 *ctrl,
 					 u32 reg, int tristate)
 {
 	u32 __iomem *regaddr = ctrl->regs.mux + (reg >> 2);
@@ -628,7 +628,7 @@ static void pinctrl_tegra23x_set_tristate(struct pinctrl_tegra23x *ctrl,
 	writel(val, regaddr);
 }
 
-static void pinctrl_tegra23x_set_opendrain(struct pinctrl_tegra23x *ctrl,
+static void pinctrl_tegra234_set_opendrain(struct pinctrl_tegra234 *ctrl,
 					  u32 reg, int opendrain)
 {
 	u32 __iomem *regaddr = ctrl->regs.mux + (reg >> 2);
@@ -640,7 +640,7 @@ static void pinctrl_tegra23x_set_opendrain(struct pinctrl_tegra23x *ctrl,
 	writel(val, regaddr);
 }
 
-static void pinctrl_tegra23x_set_ioreset(struct pinctrl_tegra23x *ctrl,
+static void pinctrl_tegra234_set_ioreset(struct pinctrl_tegra234 *ctrl,
 					u32 reg, int ioreset)
 {
 	u32 __iomem *regaddr = ctrl->regs.mux + (reg >> 2);
@@ -652,11 +652,11 @@ static void pinctrl_tegra23x_set_ioreset(struct pinctrl_tegra23x *ctrl,
 	writel(val, regaddr);
 }
 
-static int pinctrl_tegra23x_set_state(struct pinctrl_device *pdev,
+static int pinctrl_tegra234_set_state(struct pinctrl_device *pdev,
 				     struct device_node *np)
 {
-	struct pinctrl_tegra23x *ctrl =
-			container_of(pdev, struct pinctrl_tegra23x, pinctrl);
+	struct pinctrl_tegra234 *ctrl =
+			container_of(pdev, struct pinctrl_tegra234, pinctrl);
 	struct device_node *childnode;
 	int pull = -1, tri = -1, in = -1, od = -1, ior = -1, i, j, k;
 	const char *pins, *func = NULL;
@@ -667,7 +667,7 @@ static int pinctrl_tegra23x_set_state(struct pinctrl_device *pdev,
 	 * which we may want to visit.
 	 */
 	list_for_each_entry(childnode, &np->children, parent_list)
-		pinctrl_tegra23x_set_state(pdev, childnode);
+		pinctrl_tegra234_set_state(pdev, childnode);
 
 	/* read relevant state from devicetree */
 	of_property_read_string(np, "nvidia,function", &func);
@@ -691,7 +691,7 @@ static int pinctrl_tegra23x_set_state(struct pinctrl_device *pdev,
 		/* if no matching pingroup is found */
 		if (j == ctrl->drvdata->num_pingrps) {
 			/* see if we can find a drivegroup */
-			if (pinctrl_tegra23x_set_drvstate(ctrl, np))
+			if (pinctrl_tegra234_set_drvstate(ctrl, np))
 				continue;
 
 			/* nothing matching found, warn and bail out */
@@ -707,7 +707,7 @@ static int pinctrl_tegra23x_set_state(struct pinctrl_device *pdev,
 					break;
 			}
 			if (k < 4)
-				pinctrl_tegra23x_set_func(ctrl, group->reg, k);
+				pinctrl_tegra234_set_func(ctrl, group->reg, k);
 			else
 				dev_warn(ctrl->pinctrl.dev,
 					 "invalid function %s for pingroup %s in node %s\n",
@@ -715,32 +715,32 @@ static int pinctrl_tegra23x_set_state(struct pinctrl_device *pdev,
 		}
 
 		if (pull >= 0)
-			pinctrl_tegra23x_set_pull(ctrl, group->reg, pull);
+			pinctrl_tegra234_set_pull(ctrl, group->reg, pull);
 
 		if (in >= 0)
-			pinctrl_tegra23x_set_input(ctrl, group->reg, in);
+			pinctrl_tegra234_set_input(ctrl, group->reg, in);
 
 		if (tri >= 0)
-			pinctrl_tegra23x_set_tristate(ctrl, group->reg, tri);
+			pinctrl_tegra234_set_tristate(ctrl, group->reg, tri);
 
 		if (od >= 0)
-			pinctrl_tegra23x_set_opendrain(ctrl, group->reg, od);
+			pinctrl_tegra234_set_opendrain(ctrl, group->reg, od);
 
 		if (ior >= 0)
-			pinctrl_tegra23x_set_ioreset(ctrl, group->reg, ior);
+			pinctrl_tegra234_set_ioreset(ctrl, group->reg, ior);
 	}
 
 	return 0;
 }
 
-static struct pinctrl_ops pinctrl_tegra23x_ops = {
-	.set_state = pinctrl_tegra23x_set_state,
+static struct pinctrl_ops pinctrl_tegra234_ops = {
+	.set_state = pinctrl_tegra234_set_state,
 };
 
-static int pinctrl_tegra23x_probe(struct device *dev)
+static int pinctrl_tegra234_probe(struct device *dev)
 {
 	struct resource *iores;
-	struct pinctrl_tegra23x *ctrl;
+	struct pinctrl_tegra234 *ctrl;
 	int i, ret;
 	u32 **regs;
 
@@ -765,7 +765,7 @@ static int pinctrl_tegra23x_probe(struct device *dev)
 	ctrl->drvdata = device_get_match_data(dev);
 
 	ctrl->pinctrl.dev = dev;
-	ctrl->pinctrl.ops = &pinctrl_tegra23x_ops;
+	ctrl->pinctrl.ops = &pinctrl_tegra234_ops;
 
 	ret = pinctrl_register(&ctrl->pinctrl);
 	if (ret) {
@@ -778,7 +778,7 @@ static int pinctrl_tegra23x_probe(struct device *dev)
 	return 0;
 }
 
-static __maybe_unused struct of_device_id pinctrl_tegra23x_dt_ids[] = {
+static __maybe_unused struct of_device_id pinctrl_tegra234_dt_ids[] = {
 	{
 #ifdef CONFIG_ARCH_TEGRA_234_SOC
 		.compatible = "nvidia,tegra234-pinmux",
@@ -791,12 +791,12 @@ static __maybe_unused struct of_device_id pinctrl_tegra23x_dt_ids[] = {
 		/* sentinel */
 	}
 };
-MODULE_DEVICE_TABLE(of, pinctrl_tegra23x_dt_ids);
+MODULE_DEVICE_TABLE(of, pinctrl_tegra234_dt_ids);
 
-static struct driver pinctrl_tegra23x_driver = {
-	.name		= "pinctrl-tegra23x",
-	.probe		= pinctrl_tegra23x_probe,
-	.of_compatible	= DRV_OF_COMPAT(pinctrl_tegra23x_dt_ids),
+static struct driver pinctrl_tegra234_driver = {
+	.name		= "pinctrl-tegra234",
+	.probe		= pinctrl_tegra234_probe,
+	.of_compatible	= DRV_OF_COMPAT(pinctrl_tegra234_dt_ids),
 };
 
-core_platform_driver(pinctrl_tegra23x_driver);
+core_platform_driver(pinctrl_tegra234_driver);

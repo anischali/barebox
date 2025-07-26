@@ -86,8 +86,8 @@ config PINCTRL_TEGRA30
 	help
 	  The pinmux controller found on the Tegra 30+ line of SoCs.
 
-config PINCTRL_TEGRA23X
-	bool "Tegra23X pinctrl support" if COMPILE_TEST
+config PINCTRL_TEGRA234
+	bool "Tegra234 pinctrl support" if COMPILE_TEST
 	default y if ARCH_TEGRA_234_SOC
 	help
 	  The pinmux controller found on the Tegra 23x line of SoCs.

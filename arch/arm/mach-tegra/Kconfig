@@ -6,15 +6,24 @@ if ARCH_TEGRA
 
 config ARCH_TEGRA_2x_SOC
 	bool
+	depends on 32BIT
+	select CPU_V7
 
 config ARCH_TEGRA_3x_SOC
 	bool
+	depends on 32BIT
+	select CPU_V7
 
 config ARCH_TEGRA_124_SOC
 	bool
+	depends on 32BIT
+	select CPU_V7
 
 config ARCH_TEGRA_234_SOC
 	bool
+	depends on 64BIT
+	select CPU_V8
+	select CPU_SUPPORTS_64BIT_KERNEL
 
 menu "select Tegra boards to be built"
 
@@ -32,9 +41,8 @@ config MACH_NVIDIA_BEAVER
 	select I2C
 	select I2C_TEGRA
 
-config MACH_NVIDIA_JETSON
-	bool "NVIDIA Jetson TK1"
-	select ARCH_TEGRA_124_SOC
+config MACH_NVIDIA_JETSON_234
+	bool "NVIDIA Jetson on T234"
 	select ARCH_TEGRA_234_SOC
 	select I2C
 	select I2C_TEGRA

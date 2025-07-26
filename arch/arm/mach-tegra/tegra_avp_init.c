@@ -281,6 +281,8 @@ void tegra_avp_reset_vector(void)
 		break;
 	case TEGRA30:
 	case TEGRA124:
+	case TEGRA234:
+	#warning "find entry address for tegra 234"
 		entry_address = 0x80108000;
 		break;
 	default:

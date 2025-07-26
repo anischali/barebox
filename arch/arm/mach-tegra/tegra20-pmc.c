@@ -165,6 +165,10 @@ static int tegra_powergate_init(void)
 	case TEGRA124:
 		tegra_num_powerdomains = 25;
 		break;
+	case TEGRA234:
+		#warning "find the number of power domains"
+		tegra_num_powerdomains = 25;
+		break;
 	default:
 		/* Unknown Tegra variant. Disable powergating */
 		tegra_num_powerdomains = 0;

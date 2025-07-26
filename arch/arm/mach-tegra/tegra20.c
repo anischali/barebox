@@ -44,6 +44,17 @@ static int tegra30_mem_init(void)
 }
 mem_initcall(tegra30_mem_init);
 
+static int tegra234_mem_init(void)
+{
+	if (!of_machine_is_compatible("nvidia,tegra234"))
+		return 0;
+
+	arm_add_mem_device("ram0", SZ_2G, tegra234_get_ramsize());
+
+	return 0;
+}
+mem_initcall(tegra234_mem_init);
+
 static int tegra114_architected_timer_init(void)
 {
 	u32 freq, reg;

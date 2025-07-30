@@ -23,11 +23,20 @@ x86_64 binary currently is tested.
 Building barebox for EFI
 ------------------------
 
-Use the following to build barebox for EFI:
+Use the following to build barebox for EFI for x86:
 
 .. code-block:: sh
 
   export ARCH=x86
+  make efi_defconfig
+  make
+
+for EFI on arm 64 use:
+
+.. code-block:: sh
+
+  export ARCH=arm
+  export CROSS_COMPILE=aarch64-linux-gnu-
   make efi_defconfig
   make
 

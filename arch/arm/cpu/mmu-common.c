@@ -71,8 +71,6 @@ void zero_page_faulting(void)
 
 static int mmu_init(void)
 {
-	if (efi_is_payload())
-		return 0;
 
 	if (list_empty(&memory_banks)) {
 		resource_size_t start;

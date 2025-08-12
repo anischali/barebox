@@ -32,4 +32,6 @@ int efi_set_variable_usec(char *name, efi_guid_t *vendor, uint64_t usec);
 
 void *efi_earlymem_alloc(const struct efi_system_table *sys_table, size_t *memsize);
 
+int efi_dt_fixup(void *oftree);
+
 #endif

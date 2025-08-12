@@ -84,9 +84,11 @@ static struct image_handler aarch64_barebox_handler = {
 
 static int aarch64_register_image_handler(void)
 {
-	if (efi_is_payload())
+	if (efi_is_payload()) {
+		register_image_handler(&aarch64_linux_efi_handler);
 		return 0;
-
+	}
+	
 	register_image_handler(&aarch64_linux_efi_handler);
 	register_image_handler(&aarch64_linux_handler);
 	register_image_handler(&aarch64_barebox_handler);

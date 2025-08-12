@@ -85,8 +85,6 @@ static void disable_interrupts(void)
  */
 static void arch_shutdown(void)
 {
-	if (efi_is_payload())
-		return;
 
 #ifdef CONFIG_MMU
 	mmu_disable();
@@ -101,8 +99,8 @@ extern unsigned long arm_stack_top;
 
 static int arm_request_stack(void)
 {
-	if (efi_is_payload())
-		return 0;
+//	if (efi_is_payload())
+//		return 0;
 
 	if (!request_barebox_region("stack", arm_stack_top - STACK_SIZE, STACK_SIZE,
 				    MEMATTRS_RW))

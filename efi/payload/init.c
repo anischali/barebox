@@ -149,6 +149,22 @@ static int efi_set_variable_uint64_le(char *name, efi_guid_t *vendor, uint64_t v
 				sizeof(buf));
 }
 
+
+int efi_dt_fixup(void *oftree) {
+	int ret;
+	size_t handle_count;
+	efi_handle_t *handle = NULL;
+
+	ret = __efi_locate_handle(BS, BY_PROTOCOL, &efi_dt_fixup_protocol_guid,
+			NULL, &handle_count, &handle);
+	if (ret)
+		return -EINVAL;
+
+	pr_info("dt handles count: %ld\n", handle_count);
+
+	return 0;
+}
+
 struct efi_boot {
 	u32 attributes;
 	u16 file_path_len;

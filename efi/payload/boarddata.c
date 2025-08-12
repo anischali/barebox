@@ -25,7 +25,8 @@ static int handle_efi_boarddata(void)
 	if (!efidata)
 		return 0;
 
-	barebox_add_memory_bank("ram0", mem_malloc_start(), mem_malloc_size());
+	if (IS_ENABLED(CONFIG_X86))
+		barebox_add_memory_bank("ram0", mem_malloc_start(), mem_malloc_size());
 
 	efi_parent_image = efidata->image;
 	efi_sys_table = efidata->sys_table;

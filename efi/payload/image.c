@@ -78,42 +78,28 @@ struct linux_kernel_header {
 	uint32_t handover_offset;	/** */
 } __attribute__ ((packed));
 
-static void *efi_read_file(const char *file, size_t *size)
+static void *efi_allocate_pages(void *data, size_t size,
+				enum efi_allocate_type allocate_type,
+				enum efi_memory_type mem_type)
 {
 	efi_physical_addr_t mem;
 	efi_status_t efiret;
-	struct stat s;
 	char *buf;
-	ssize_t ret;
 
-	buf = read_file(file, size);
-	if (buf || errno != ENOMEM)
-		return buf;
-
-	ret = stat(file, &s);
-	if (ret)
-		return NULL;
-
-	efiret = BS->allocate_pages(EFI_ALLOCATE_ANY_PAGES,
-				    EFI_LOADER_CODE,
-				    DIV_ROUND_UP(s.st_size, EFI_PAGE_SIZE),
-				    &mem);
+	efiret = BS->allocate_pages(allocate_type, mem_type,
+				    DIV_ROUND_UP(size, EFI_PAGE_SIZE), &mem);
 	if (EFI_ERROR(efiret)) {
 		errno = efi_errno(efiret);
 		return NULL;
 	}
 
 	buf = efi_phys_to_virt(mem);
+	memcpy(buf, data, size);
 
-	ret = read_file_into_buf(file, buf, s.st_size);
-	if (ret < 0)
-		return NULL;
-
-	*size = ret;
 	return buf;
 }
 
-static void efi_free_file(void *_mem, size_t size)
+static void efi_free_pages(void *_mem, size_t size)
 {
 	efi_physical_addr_t mem = efi_virt_to_phys(_mem);
 
@@ -123,28 +109,35 @@ static void efi_free_file(void *_mem, size_t size)
 		BS->free_pages(mem, DIV_ROUND_UP(size, EFI_PAGE_SIZE));
 }
 
-static int efi_load_image(const char *file, struct efi_loaded_image **loaded_image,
-		efi_handle_t *h)
+static int efi_load_file_image(const char *file,
+			       struct efi_loaded_image **loaded_image,
+			       efi_handle_t *h)
 {
 	void *exe;
+	char *buf;
 	size_t size;
 	efi_handle_t handle;
 	efi_status_t efiret = EFI_SUCCESS;
 
-	exe = efi_read_file(file, &size);
-	if (!exe)
-		return -errno;
+	buf = read_file(file, &size);
+	if (!buf)
+		return -ENOMEM;
 
-	efiret = BS->load_image(false, efi_parent_image, efi_device_path, exe, size,
-			&handle);
+	exe = efi_allocate_pages(buf, size, EFI_ALLOCATE_ANY_PAGES,
+				 EFI_LOADER_CODE);
+	if (!exe)
+		return -ENOMEM;
+
+	efiret = BS->load_image(false, efi_parent_image, efi_device_path, exe,
+				size, &handle);
 	if (EFI_ERROR(efiret)) {
 		pr_err("failed to LoadImage: %s\n", efi_strerror(efiret));
 		goto out;
 	};
 
 	efiret = BS->open_protocol(handle, &efi_loaded_image_protocol_guid,
-			(void **)loaded_image,
-			efi_parent_image, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+				   (void **)loaded_image, efi_parent_image,
+				   NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
 	if (EFI_ERROR(efiret)) {
 		pr_err("failed to OpenProtocol: %s\n", efi_strerror(efiret));
 		BS->unload_image(handle);
@@ -153,7 +146,7 @@ static int efi_load_image(const char *file, struct efi_loaded_image **loaded_ima
 
 	*h = handle;
 out:
-	efi_free_file(exe, size);
+	efi_free_pages(exe, size);
 	return -efi_errno(efiret);
 }
 
@@ -172,13 +165,16 @@ static bool is_linux_image(enum filetype filetype, const void *base)
 	return false;
 }
 
-static int efi_execute_image(efi_handle_t handle, struct efi_loaded_image *loaded_image, enum filetype filetype)
-{	
+static int efi_execute_image(efi_handle_t handle,
+			     struct efi_loaded_image *loaded_image,
+			     enum filetype filetype)
+{
 	efi_status_t efiret;
 	const char *options;
 	bool is_driver;
 
-	is_driver = (loaded_image->image_code_type == EFI_BOOT_SERVICES_CODE) ||
+	is_driver =
+		(loaded_image->image_code_type == EFI_BOOT_SERVICES_CODE) ||
 		(loaded_image->image_code_type == EFI_RUNTIME_SERVICES_CODE);
 
 	if (is_linux_image(filetype, loaded_image->image_base)) {
@@ -186,7 +182,8 @@ static int efi_execute_image(efi_handle_t handle, struct efi_loaded_image *loade
 		options = linux_bootargs_get();
 		pr_info("add linux options '%s'\n", options);
 		if (options) {
-			loaded_image->load_options = xstrdup_char_to_wchar(options);
+			loaded_image->load_options =
+				xstrdup_char_to_wchar(options);
 			loaded_image->load_options_size =
 				(strlen(options) + 1) * sizeof(wchar_t);
 		}
@@ -210,11 +207,11 @@ static int efi_execute_image(efi_handle_t handle, struct efi_loaded_image *loade
 	return -efi_errno(efiret);
 }
 
-typedef void(*handover_fn)(void *image, struct efi_system_table *table,
-		struct linux_kernel_header *header);
+typedef void (*handover_fn)(void *image, struct efi_system_table *table,
+			    struct linux_kernel_header *header);
 
 static inline void linux_efi_handover(efi_handle_t handle,
-		struct linux_kernel_header *header)
+				      struct linux_kernel_header *header)
 {
 	handover_fn handover;
 	uintptr_t addr;
@@ -238,7 +235,7 @@ static int do_bootm_efi(struct image_data *data)
 	struct efi_loaded_image *loaded_image;
 	struct linux_kernel_header *image_header, *boot_header;
 
-	ret = efi_load_image(data->os_file, &loaded_image, &handle);
+	ret = efi_load_file_image(data->os_file, &loaded_image, &handle);
 	if (ret)
 		return ret;
 
@@ -278,8 +275,9 @@ static int do_bootm_efi(struct image_data *data)
 		boot_header->cmdline_size = strlen(options);
 	}
 
-	boot_header->code32_start = efi_virt_to_phys(loaded_image->image_base +
-			(image_header->setup_sects+1) * 512);
+	boot_header->code32_start =
+		efi_virt_to_phys(loaded_image->image_base +
+				 (image_header->setup_sects + 1) * 512);
 
 	if (bootm_verbose(data)) {
 		printf("\nStarting kernel at 0x%p", loaded_image->image_base);
@@ -305,33 +303,32 @@ static int do_bootm_efi(struct image_data *data)
 	return 0;
 }
 
-static int efi_load_mem_image(void *image, unsigned long size, struct efi_loaded_image **loaded_image,
-		efi_handle_t *h)
+static int efi_load_os(struct image_data *data, efi_handle_t *h,
+		       struct efi_loaded_image **loaded_image)
 {
 	efi_handle_t handle;
-	efi_physical_addr_t mem;
 	efi_status_t efiret = EFI_SUCCESS;
-	char *buf = NULL;
+	size_t image_size = 0;
+	void *image = NULL;
+	void *mem = NULL;
 	int ret = 0;
 
-	efiret = BS->allocate_pages(EFI_ALLOCATE_ANY_PAGES,
-				    EFI_LOADER_CODE,
-				    DIV_ROUND_UP(size, EFI_PAGE_SIZE),
-				    &mem);
-	if (EFI_ERROR(efiret)) {
-		return -efi_errno(efiret);
+	if (data->os_fit) {
+		image = (void *)data->fit_kernel;
+		image_size = data->fit_kernel_size;
 	}
 
-	buf = efi_phys_to_virt(mem);
+	else if (data->os_file)
+		return efi_load_file_image(data->os_file, loaded_image,
+					   &handle);
 
-	buf = memcpy(buf, image, size);
-	if (!buf) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	mem = efi_allocate_pages(image, image_size, EFI_ALLOCATE_ANY_PAGES,
+				 EFI_LOADER_CODE);
+	if (!mem)
+		return -ENOMEM;
 
-	efiret = BS->load_image(false, efi_parent_image, efi_device_path, image, size,
-			&handle);
+	efiret = BS->load_image(false, efi_parent_image, efi_device_path, image,
+				image_size, &handle);
 	if (EFI_ERROR(efiret)) {
 		pr_err("failed to LoadImage: %s\n", efi_strerror(efiret));
 		ret = -efi_errno(efiret);
@@ -339,8 +336,8 @@ static int efi_load_mem_image(void *image, unsigned long size, struct efi_loaded
 	};
 
 	efiret = BS->open_protocol(handle, &efi_loaded_image_protocol_guid,
-			(void **)loaded_image,
-			efi_parent_image, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+				   (void **)loaded_image, efi_parent_image,
+				   NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
 	if (EFI_ERROR(efiret)) {
 		pr_err("failed to OpenProtocol: %s\n", efi_strerror(efiret));
 		BS->unload_image(handle);
@@ -350,54 +347,48 @@ static int efi_load_mem_image(void *image, unsigned long size, struct efi_loaded
 
 	*h = handle;
 out:
-	BS->free_pages(mem, DIV_ROUND_UP(size, EFI_PAGE_SIZE));
+	efi_free_pages(mem, image_size);
 	return ret;
 }
 
-static int efi_load_ramdisk(struct image_data *data) {
-	efi_physical_addr_t mem;
+static int efi_load_ramdisk(struct image_data *data)
+{
+	void *mem;
 	efi_status_t efiret = EFI_SUCCESS;
 	const void *initrd;
 	unsigned long initrd_size;
-	char *buf = NULL;
 	bool from_fit = false;
 	int ret;
-	
+
 	if (data->os_fit) {
-		from_fit = fit_has_image(data->os_fit, data->fit_config, "ramdisk");
-		if(from_fit) {
-			ret = fit_open_image(data->os_fit, data->fit_config, "ramdisk",
-					     &initrd, &initrd_size);
+		from_fit = fit_has_image(data->os_fit, data->fit_config,
+					 "ramdisk");
+		if (from_fit) {
+			ret = fit_open_image(data->os_fit, data->fit_config,
+					     "ramdisk", &initrd, &initrd_size);
 			if (ret) {
 				pr_err("Cannot open ramdisk image in FIT image: %pe\n",
-						ERR_PTR(ret));
+				       ERR_PTR(ret));
 				return ret;
 			}
 		}
 	}
 
-	if (!from_fit){
+	if (!from_fit) {
+		if (!data->initrd_file)
+			return 0;
+
 		pr_info("Loading ramdisk from '%s'\n", data->initrd_file);
-		ret = read_file_2(data->initrd_file, &initrd_size, (void *)&initrd,
-			FILESIZE_MAX);
-	}
-	
-	efiret = BS->allocate_pages(EFI_ALLOCATE_MAX_ADDRESS,
-				    EFI_LOADER_DATA,
-				    DIV_ROUND_UP(initrd_size, EFI_PAGE_SIZE),
-				    &mem);
-	if (EFI_ERROR(efiret)) {
-		return -efi_errno(efiret);
+		initrd = read_file(data->initrd_file, &initrd_size);
 	}
 
-	buf = efi_phys_to_virt(mem);
-	buf = memcpy(buf, initrd, initrd_size);
-	if (!buf) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	mem = efi_allocate_pages((void *)initrd, initrd_size,
+				 EFI_ALLOCATE_MAX_ADDRESS, EFI_LOADER_DATA);
+	if (!mem)
+		return -ENOMEM;
 
-	efiret = BS->install_configuration_table(&efi_linux_initrd_media_guid, buf);
+	efiret = BS->install_configuration_table(&efi_linux_initrd_media_guid,
+						 (void *)mem);
 	if (EFI_ERROR(efiret)) {
 		ret = -efi_errno(efiret);
 		goto out;
@@ -405,14 +396,14 @@ static int efi_load_ramdisk(struct image_data *data) {
 
 	return 0;
 out:
-	BS->free_pages(mem, DIV_ROUND_UP(initrd_size, EFI_PAGE_SIZE));
+	efi_free_pages(mem, initrd_size);
 	return ret;
 }
 
-static int efi_load_dtb(struct image_data *data) {
-	efi_physical_addr_t mem;
+static int efi_load_dtb(struct image_data *data, void **fdt)
+{
 	efi_status_t efiret = EFI_SUCCESS;
-	char *buf = NULL;
+	void *mem = NULL;
 	const void *of_tree;
 	unsigned long of_size;
 	bool from_fit = false;
@@ -421,69 +412,53 @@ static int efi_load_dtb(struct image_data *data) {
 	if (data->os_fit) {
 		from_fit = fit_has_image(data->os_fit, data->fit_config, "fdt");
 		if (from_fit) {
-			ret = fit_open_image(data->os_fit, data->fit_config, "fdt",
-			     &of_tree, &of_size);
+			ret = fit_open_image(data->os_fit, data->fit_config,
+					     "fdt", &of_tree, &of_size);
 			if (ret)
 				return ret;
 		}
 	}
-	
-	if (!from_fit){
+
+	if (!from_fit) {
+		if (!data->oftree_file)
+			return 0;
+
 		pr_info("Loading devicetree from '%s'\n", data->oftree_file);
-		ret = read_file_2(data->oftree_file, &of_size, (void *)&of_tree,
-			FILESIZE_MAX);
+		of_tree = read_file(data->oftree_file, &of_size);
 	}
 
-	efiret = BS->allocate_pages(EFI_ALLOCATE_ANY_PAGES,
-				    EFI_ACPI_RECLAIM_MEMORY,
-				    DIV_ROUND_UP(of_size + EFI_PAGE_SIZE, EFI_PAGE_SIZE),
-				    &mem);
-	if (EFI_ERROR(efiret)) {
-		return -efi_errno(efiret);
-	}
+	mem = efi_allocate_pages((void *)of_tree, of_size,
+				 EFI_ALLOCATE_ANY_PAGES,
+				 EFI_ACPI_RECLAIM_MEMORY);
+	if (!mem)
+		return -ENOMEM;
 
-	buf = efi_phys_to_virt(mem);
-	buf = memcpy(buf, of_tree, of_size);
-	if (!buf) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	efiret = BS->install_configuration_table(&efi_fdt_guid, buf);
+	efiret = BS->install_configuration_table(&efi_fdt_guid, (void *)mem);
 	if (EFI_ERROR(efiret)) {
 		ret = -efi_errno(efiret);
 		goto out;
 	}
 
+	*fdt = (void *)mem;
+
 	return 0;
 out:
-	BS->free_pages(mem, DIV_ROUND_UP(of_size + EFI_PAGE_SIZE, EFI_PAGE_SIZE));
+	efi_free_pages(mem, of_size);
 	return ret;
 }
 
-static int do_bootm_arm64_efi(struct image_data *data) {
-	size_t image_size = 0;
+static int do_bootm_efi_stub(struct image_data *data)
+{
 	efi_handle_t handle = NULL;
 	struct efi_loaded_image *loaded_image;
-	void *image = NULL;
+	void *fdt;
 	int ret = 0;
-	
-	if (data->os_fit) {
-		image = (void *)data->fit_kernel;
-		image_size = data->fit_kernel_size;
-		
-		ret = efi_load_mem_image((void *)image, image_size, &loaded_image, &handle);
-		if (ret)
-			return ret;
-	}
 
-	else if (data->os_file) {
-		ret = efi_load_image(data->os_file, &loaded_image, &handle);
-		if (ret)
-			return ret;
-	}
+	ret = efi_load_os(data, &handle, &loaded_image);
+	if (ret)
+		return ret;
 
-	ret = efi_load_dtb(data);
+	ret = efi_load_dtb(data, &fdt);
 	if (ret)
 		return ret;
 
@@ -491,8 +466,9 @@ static int do_bootm_arm64_efi(struct image_data *data) {
 	if (ret)
 		return ret;
 
-	return efi_execute_image(handle, loaded_image, 
-		file_detect_type(loaded_image->image_base, PAGE_SIZE));
+	return efi_execute_image(handle, loaded_image,
+				 file_detect_type(loaded_image->image_base,
+						  PAGE_SIZE));
 }
 
 static struct image_handler efi_handle_tr = {
@@ -503,7 +479,7 @@ static struct image_handler efi_handle_tr = {
 
 static struct image_handler efi_arm64_handle_tr = {
 	.name = "EFI ARM64 Linux kernel",
-	.bootm = do_bootm_arm64_efi,
+	.bootm = do_bootm_efi_stub,
 	.filetype = filetype_arm64_efi_linux_image,
 };
 
@@ -513,7 +489,7 @@ static int efi_execute(struct binfmt_hook *b, char *file, int argc, char **argv)
 	efi_handle_t handle;
 	struct efi_loaded_image *loaded_image;
 
-	ret = efi_load_image(file, &loaded_image, &handle);
+	ret = efi_load_file_image(file, &loaded_image, &handle);
 	if (ret)
 		return ret;
 

@@ -274,6 +274,7 @@ source "arch/arm/mach-vexpress/Kconfig"
 source "arch/arm/mach-tegra/Kconfig"
 source "arch/arm/mach-zynq/Kconfig"
 source "arch/arm/mach-zynqmp/Kconfig"
+source "arch/arm/mach-efi/Kconfig"
 
 config BOARD_ARM_VIRT
 	bool

@@ -111,6 +111,7 @@ machine-$(CONFIG_ARCH_VEXPRESS)		+= vexpress
 machine-$(CONFIG_ARCH_TEGRA)		+= tegra
 machine-$(CONFIG_ARCH_ZYNQ)		+= zynq
 machine-$(CONFIG_ARCH_ZYNQMP)		+= zynqmp
+machine-$(CONFIG_EFI_ARM64)		+= efi
 
 # Add cleanup flags
 KBUILD_CPPFLAGS += -fdata-sections -ffunction-sections

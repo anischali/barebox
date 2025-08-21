@@ -268,6 +268,10 @@ enum efi_reset_type {
 	EFI_RESET_PLATFORM_SPECIFIC = 3,
 };
 
+enum efi_dt_fixup {
+    EFI_DT_APPLY_FIXUPS = 1,
+    EFI_DT_RESERVE_MEMORY = 2,
+};
 /*
  * EFI Runtime Services table
  */

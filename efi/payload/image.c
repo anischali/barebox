@@ -317,10 +317,8 @@ static int efi_load_os(struct image_data *data, efi_handle_t *h,
 		image = (void *)data->fit_kernel;
 		image_size = data->fit_kernel_size;
 	}
-
 	else if (data->os_file)
-		return efi_load_file_image(data->os_file, loaded_image,
-					   &handle);
+		return efi_load_file_image(data->os_file, loaded_image, h);
 
 	mem = efi_allocate_pages(image, image_size, EFI_ALLOCATE_ANY_PAGES,
 				 EFI_LOADER_CODE);
@@ -387,8 +385,8 @@ static int efi_load_ramdisk(struct image_data *data)
 	if (!mem)
 		return -ENOMEM;
 
-	efiret = BS->install_configuration_table(&efi_linux_initrd_media_guid,
-						 (void *)mem);
+	efiret = BS->install_configuration_table(&efi_linux_initrd_media_guid, 
+			(void *)efi_virt_to_phys(mem));
 	if (EFI_ERROR(efiret)) {
 		ret = -efi_errno(efiret);
 		goto out;
@@ -433,18 +431,42 @@ static int efi_load_dtb(struct image_data *data, void **fdt)
 	if (!mem)
 		return -ENOMEM;
 
-	efiret = BS->install_configuration_table(&efi_fdt_guid, (void *)mem);
+	efiret = BS->install_configuration_table(&efi_fdt_guid, 
+			(void *)efi_virt_to_phys(mem));
 	if (EFI_ERROR(efiret)) {
 		ret = -efi_errno(efiret);
 		goto out;
 	}
 
-	*fdt = (void *)mem;
+	*fdt = (void *)efi_virt_to_phys(mem);
 
 	return 0;
 out:
 	efi_free_pages(mem, of_size);
 	return ret;
+}
+
+static int efi_dt_fixup(efi_handle_t handle, void **fdt)
+{
+	efi_status_t efiret = EFI_SUCCESS;
+	int fdt_size;
+	int ret;
+
+	fdt_size = be32_to_cpu(((struct fdt_header *)fdt)->totalsize);
+	efiret = BS->open_protocol(handle, &efi_dt_fixup_protocol_guid,
+				   (void **)fdt, efi_parent_image, NULL,
+				   EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+	if (EFI_ERROR(efiret)) {
+		pr_err("failed to OpenProtocol %s: %s\n",
+		       efi_guid_string(
+			       (efi_guid_t *)&efi_dt_fixup_protocol_guid),
+		       efi_strerror(efiret));
+
+		ret = -efi_errno(efiret);
+		return ret;
+	}
+
+	return 0;
 }
 
 static int do_bootm_efi_stub(struct image_data *data)
@@ -465,6 +487,9 @@ static int do_bootm_efi_stub(struct image_data *data)
 	ret = efi_load_ramdisk(data);
 	if (ret)
 		return ret;
+
+	if (fdt != NULL)
+		efi_dt_fixup(handle, &fdt);
 
 	return efi_execute_image(handle, loaded_image,
 				 file_detect_type(loaded_image->image_base,

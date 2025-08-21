@@ -36,9 +36,6 @@ void sync_caches_for_execution(void)
 	arm_early_mmu_cache_flush();
 }
 
-#define R_ARM_RELATIVE 23
-#define R_AARCH64_RELATIVE 1027
-
 void pbl_barebox_break(void)
 {
 	__asm__ __volatile__ (

@@ -36,6 +36,10 @@ typedef struct user_fp elf_fpregset_t;
 #define R_ARM_THM_CALL		10
 #define R_ARM_THM_JUMP24	30
 
+#define R_AARCH64_NONE 0
+#define R_ARM_RELATIVE 23
+#define R_AARCH64_RELATIVE 1027
+
 /*
  * These are used to set parameters in the core dumps.
  */

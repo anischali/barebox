@@ -78,6 +78,11 @@ struct linux_kernel_header {
 	uint32_t handover_offset;	/** */
 } __attribute__ ((packed));
 
+struct efi_linux_initrd {
+	uint64_t base;
+	uint64_t size;
+} __attribute__ ((packed));
+
 static void *efi_allocate_pages(void *data, size_t size,
 				enum efi_allocate_type allocate_type,
 				enum efi_memory_type mem_type)
@@ -353,6 +358,7 @@ static int efi_load_ramdisk(struct image_data *data)
 {
 	void *mem;
 	efi_status_t efiret = EFI_SUCCESS;
+	struct efi_linux_initrd *efi_initrd;
 	const void *initrd;
 	unsigned long initrd_size;
 	bool from_fit = false;
@@ -380,13 +386,21 @@ static int efi_load_ramdisk(struct image_data *data)
 		initrd = read_file(data->initrd_file, &initrd_size);
 	}
 
+	BS->allocate_pool(EFI_LOADER_DATA, sizeof(struct efi_linux_initrd), 
+			(void **)&efi_initrd);
+	if (!efi_initrd)
+		return -ENOMEM;
+
 	mem = efi_allocate_pages((void *)initrd, initrd_size,
 				 EFI_ALLOCATE_MAX_ADDRESS, EFI_LOADER_DATA);
 	if (!mem)
 		return -ENOMEM;
 
+	efi_initrd->base = (uint64_t)efi_virt_to_phys(mem);
+	efi_initrd->size = (uint64_t)initrd_size;
+
 	efiret = BS->install_configuration_table(&efi_linux_initrd_media_guid, 
-			(void *)efi_virt_to_phys(mem));
+			(void *)efi_initrd);
 	if (EFI_ERROR(efiret)) {
 		ret = -efi_errno(efiret);
 		goto out;

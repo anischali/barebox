@@ -308,6 +308,30 @@ static int do_bootm_efi(struct image_data *data)
 	return 0;
 }
 
+static bool ramdisk_is_fit(struct image_data *data) {
+
+	if (bootm_signed_images_are_forced())
+		return true;
+	
+	if (data->initrd_file)
+		return false;
+	
+	return data->os_fit ? (bool)fit_has_image(data->os_fit, 
+			data->fit_config, "ramdisk") : false;
+}
+
+static bool fdt_is_fit(struct image_data *data) {
+
+	if (bootm_signed_images_are_forced())
+		return true;
+	
+	if (data->oftree_file)
+		return false;
+	
+	return data->os_fit ? (bool)fit_has_image(data->os_fit, 
+			data->fit_config, "fdt") : false;
+}
+
 static int efi_load_os(struct image_data *data, efi_handle_t *h,
 		       struct efi_loaded_image **loaded_image)
 {
@@ -361,23 +385,21 @@ static int efi_load_ramdisk(struct image_data *data)
 	struct efi_linux_initrd *efi_initrd;
 	const void *initrd;
 	unsigned long initrd_size;
-	bool from_fit = false;
+	bool from_fit;
 	int ret;
 
-	if (data->os_fit) {
-		from_fit = fit_has_image(data->os_fit, data->fit_config,
-					 "ramdisk");
-		if (from_fit) {
-			ret = fit_open_image(data->os_fit, data->fit_config,
-					     "ramdisk", &initrd, &initrd_size);
-			if (ret) {
-				pr_err("Cannot open ramdisk image in FIT image: %pe\n",
-				       ERR_PTR(ret));
-				return ret;
-			}
+	from_fit = ramdisk_is_fit(data);
+
+	if (from_fit) {
+		ret = fit_open_image(data->os_fit, data->fit_config,
+				     "ramdisk", &initrd, &initrd_size);
+		if (ret) {
+			pr_err("Cannot open ramdisk image in FIT image: %pe\n",
+			       ERR_PTR(ret));
+			return ret;
 		}
 	}
-
+	
 	if (!from_fit) {
 		if (!data->initrd_file)
 			return 0;
@@ -412,23 +434,22 @@ out:
 	return ret;
 }
 
-static int efi_load_dtb(struct image_data *data, void **fdt)
+static int efi_load_fdt(struct image_data *data, void **fdt)
 {
 	efi_status_t efiret = EFI_SUCCESS;
 	void *mem = NULL;
 	const void *of_tree;
 	unsigned long of_size;
-	bool from_fit = false;
+	bool from_fit;
 	int ret;
 
-	if (data->os_fit) {
-		from_fit = fit_has_image(data->os_fit, data->fit_config, "fdt");
-		if (from_fit) {
-			ret = fit_open_image(data->os_fit, data->fit_config,
-					     "fdt", &of_tree, &of_size);
-			if (ret)
-				return ret;
-		}
+	from_fit = fdt_is_fit(data);
+
+	if (from_fit) {
+		ret = fit_open_image(data->os_fit, data->fit_config,
+				     "fdt", &of_tree, &of_size);
+		if (ret)
+			return ret;
 	}
 
 	if (!from_fit) {
@@ -494,7 +515,7 @@ static int do_bootm_efi_stub(struct image_data *data)
 	if (ret)
 		return ret;
 
-	ret = efi_load_dtb(data, &fdt);
+	ret = efi_load_fdt(data, &fdt);
 	if (ret)
 		return ret;
 

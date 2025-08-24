@@ -38,6 +38,9 @@ config EFI_GUID
 config EFI_DEVICEPATH
 	bool
 
+config EFI_FDT_FORCE
+	bool
+
 config EFI_PAYLOAD_DEFAULT_PATH
 	string
 	default "EFI/BOOT/BOOTARM.EFI"		if ARM32

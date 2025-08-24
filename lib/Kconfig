@@ -121,6 +121,10 @@ config FSL_QE_FIRMWARE
 	select CRC32
 	bool
 
+config FDT_PADDING
+	default 4096
+	int 
+
 config LIBFDT
 	bool
 

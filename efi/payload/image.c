@@ -78,30 +78,38 @@ struct linux_kernel_header {
 	uint32_t handover_offset;	/** */
 } __attribute__ ((packed));
 
-struct efi_linux_initrd {
-	uint64_t base;
-	uint64_t size;
+struct efi_mem_resource {
+	efi_physical_addr_t base;
+	size_t size;
 } __attribute__ ((packed));
 
-static void *efi_allocate_pages(void *data, size_t size,
+struct efi_image_data {
+	struct image_data *data;
+
+	efi_handle_t handle;
+	struct efi_loaded_image *loaded_image;
+
+	struct efi_mem_resource image_res;
+	struct efi_mem_resource oftree_res;
+	struct efi_mem_resource *initrd_res;
+};
+
+
+static void * efi_allocate_pages(efi_physical_addr_t *mem,
+				size_t size,
 				enum efi_allocate_type allocate_type,
 				enum efi_memory_type mem_type)
 {
-	efi_physical_addr_t mem;
 	efi_status_t efiret;
-	char *buf;
 
 	efiret = BS->allocate_pages(allocate_type, mem_type,
-				    DIV_ROUND_UP(size, EFI_PAGE_SIZE), &mem);
+				    DIV_ROUND_UP(size, EFI_PAGE_SIZE), mem);
 	if (EFI_ERROR(efiret)) {
 		errno = efi_errno(efiret);
 		return NULL;
 	}
-
-	buf = efi_phys_to_virt(mem);
-	memcpy(buf, data, size);
-
-	return buf;
+	
+	return efi_phys_to_virt(*mem);
 }
 
 static void efi_free_pages(void *_mem, size_t size)
@@ -118,6 +126,7 @@ static int efi_load_file_image(const char *file,
 			       struct efi_loaded_image **loaded_image,
 			       efi_handle_t *h)
 {
+	efi_physical_addr_t mem;
 	void *exe;
 	char *buf;
 	size_t size;
@@ -128,10 +137,14 @@ static int efi_load_file_image(const char *file,
 	if (!buf)
 		return -ENOMEM;
 
-	exe = efi_allocate_pages(buf, size, EFI_ALLOCATE_ANY_PAGES,
+	exe = efi_allocate_pages(&mem, size, EFI_ALLOCATE_ANY_PAGES,
 				 EFI_LOADER_CODE);
-	if (!exe)
+	if (!exe) {
+		pr_err("Failed to allocate pages for image\n");
 		return -ENOMEM;
+	}
+
+	memcpy(exe, buf, size);
 
 	efiret = BS->load_image(false, efi_parent_image, efi_device_path, exe,
 				size, &handle);
@@ -150,6 +163,8 @@ static int efi_load_file_image(const char *file,
 	}
 
 	*h = handle;
+
+	return 0;
 out:
 	efi_free_pages(exe, size);
 	return -efi_errno(efiret);
@@ -332,66 +347,88 @@ static bool fdt_is_fit(struct image_data *data) {
 			data->fit_config, "fdt") : false;
 }
 
-static int efi_load_os(struct image_data *data, efi_handle_t *h,
-		       struct efi_loaded_image **loaded_image)
+static int efi_load_os(struct efi_image_data *e)
 {
-	efi_handle_t handle;
 	efi_status_t efiret = EFI_SUCCESS;
+	efi_physical_addr_t mem;
 	size_t image_size = 0;
 	void *image = NULL;
-	void *mem = NULL;
+	void *vmem = NULL;
 	int ret = 0;
 
-	if (data->os_fit) {
-		image = (void *)data->fit_kernel;
-		image_size = data->fit_kernel_size;
+	if (e->data->os_fit) {
+		image = (void *)e->data->fit_kernel;
+		image_size = e->data->fit_kernel_size;
 	}
-	else if (data->os_file)
-		return efi_load_file_image(data->os_file, loaded_image, h);
+	else if (e->data->os_file)
+		return efi_load_file_image(e->data->os_file, &e->loaded_image, &e->handle);
 
-	mem = efi_allocate_pages(image, image_size, EFI_ALLOCATE_ANY_PAGES,
+	vmem = efi_allocate_pages(&mem, image_size, EFI_ALLOCATE_ANY_PAGES,
 				 EFI_LOADER_CODE);
-	if (!mem)
+	if (!vmem) {
+		pr_err("Failed to allocate pages for image\n");
 		return -ENOMEM;
+	}
+
+	memcpy(vmem, image, image_size);
 
 	efiret = BS->load_image(false, efi_parent_image, efi_device_path, image,
-				image_size, &handle);
+				image_size, &e->handle);
 	if (EFI_ERROR(efiret)) {
-		pr_err("failed to LoadImage: %s\n", efi_strerror(efiret));
 		ret = -efi_errno(efiret);
-		goto out;
+		pr_err("failed to LoadImage: %s\n", efi_strerror(efiret));
+		goto out_mem;
 	};
 
-	efiret = BS->open_protocol(handle, &efi_loaded_image_protocol_guid,
-				   (void **)loaded_image, efi_parent_image,
+	efiret = BS->open_protocol(e->handle, &efi_loaded_image_protocol_guid,
+				   (void **)&e->loaded_image, efi_parent_image,
 				   NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
 	if (EFI_ERROR(efiret)) {
-		pr_err("failed to OpenProtocol: %s\n", efi_strerror(efiret));
-		BS->unload_image(handle);
 		ret = -efi_errno(efiret);
-		goto out;
+		pr_err("failed to OpenProtocol: %s\n", efi_strerror(efiret));
+		goto out_unload;
 	}
 
-	*h = handle;
-out:
-	efi_free_pages(mem, image_size);
+	e->image_res.base = mem;
+	e->image_res.size = image_size;
+
+	return 0;
+
+out_mem:
+	efi_free_pages(vmem, image_size);
+out_unload:
+	BS->unload_image(e->handle);
 	return ret;
 }
 
-static int efi_load_ramdisk(struct image_data *data)
+static void efi_unload_os(struct efi_image_data *e) {
+	BS->close_protocol(e->handle, &efi_loaded_image_protocol_guid,
+				 efi_parent_image, NULL);
+	
+	BS->unload_image(e->handle);
+	efi_free_pages(efi_phys_to_virt(e->image_res.base),
+				 e->image_res.size);
+}
+
+/*
+	We directly pass the initrd to the kernel instead of
+	exposing a boot servide that will be called later.
+	I notived barbox does not expose runtime services.
+*/
+static int efi_load_ramdisk(struct efi_image_data *e)
 {
-	void *mem;
+	void *vmem, *tmp = NULL;
+	efi_physical_addr_t mem;
 	efi_status_t efiret = EFI_SUCCESS;
-	struct efi_linux_initrd *efi_initrd;
 	const void *initrd;
 	unsigned long initrd_size;
 	bool from_fit;
 	int ret;
 
-	from_fit = ramdisk_is_fit(data);
+	from_fit = ramdisk_is_fit(e->data);
 
 	if (from_fit) {
-		ret = fit_open_image(data->os_fit, data->fit_config,
+		ret = fit_open_image(e->data->os_fit, e->data->fit_config,
 				     "ramdisk", &initrd, &initrd_size);
 		if (ret) {
 			pr_err("Cannot open ramdisk image in FIT image: %pe\n",
@@ -401,94 +438,165 @@ static int efi_load_ramdisk(struct image_data *data)
 	}
 	
 	if (!from_fit) {
-		if (!data->initrd_file)
+		if (!e->data->initrd_file)
 			return 0;
 
-		pr_info("Loading ramdisk from '%s'\n", data->initrd_file);
-		initrd = read_file(data->initrd_file, &initrd_size);
+		pr_info("Loading ramdisk from '%s'\n", e->data->initrd_file);
+		tmp = read_file(e->data->initrd_file, &initrd_size);
+		if (!tmp || initrd_size <= 0) {
+			pr_err("Failed to read initrd from file: %s\n", e->data->initrd_file);
+			return -EINVAL;
+		}
+		initrd = tmp;
 	}
 
-	BS->allocate_pool(EFI_LOADER_DATA, sizeof(struct efi_linux_initrd), 
-			(void **)&efi_initrd);
-	if (!efi_initrd)
-		return -ENOMEM;
+	efiret = BS->allocate_pool(EFI_LOADER_DATA, sizeof(struct efi_mem_resource), 
+			(void **)&e->initrd_res);
+	if (EFI_ERROR(efiret) || !e->initrd_res) {
+		ret = -efi_errno(efiret);
+		pr_err("Failed to allocate initrd %s/n", efi_strerror(efiret));
+		goto free_mem;
+	}
 
-	mem = efi_allocate_pages((void *)initrd, initrd_size,
+	vmem = efi_allocate_pages(&mem, initrd_size,
 				 EFI_ALLOCATE_MAX_ADDRESS, EFI_LOADER_DATA);
-	if (!mem)
-		return -ENOMEM;
+	if (!vmem) {
+		pr_err("Failed to allocate pages for initrd data\n");
+		ret = -ENOMEM;
+		goto free_pool;
+	}
+	
+	memcpy(vmem, (void *)initrd, initrd_size);
 
-	efi_initrd->base = (uint64_t)efi_virt_to_phys(mem);
-	efi_initrd->size = (uint64_t)initrd_size;
-
+	e->initrd_res->base = (uint64_t)mem;
+	e->initrd_res->size = (uint64_t)initrd_size;
+	
 	efiret = BS->install_configuration_table(&efi_linux_initrd_media_guid, 
-			(void *)efi_initrd);
+	(void *)e->initrd_res);
 	if (EFI_ERROR(efiret)) {
 		ret = -efi_errno(efiret);
-		goto out;
+		pr_err("Failed to install INITRD %s/n", efi_strerror(efiret));
+		goto free_pages;
 	}
 
+	if (!from_fit && tmp)
+		free(tmp);
+
 	return 0;
-out:
-	efi_free_pages(mem, initrd_size);
+
+free_pages:
+	efi_free_pages(vmem, initrd_size);	
+free_pool:
+	BS->free_pool(e->initrd_res);
+free_mem:
+	if (!from_fit && tmp)
+		free(tmp);
+
 	return ret;
 }
 
-static int efi_load_fdt(struct image_data *data, void **fdt)
+static void efi_unload_ramdisk(struct efi_image_data *e) {
+	BS->install_configuration_table(&efi_linux_initrd_media_guid, NULL);
+
+	efi_free_pages(efi_phys_to_virt(e->initrd_res->base),
+				 e->initrd_res->size);
+
+	BS->free_pool(e->initrd_res);
+	e->initrd_res = NULL;
+}
+
+static int efi_load_fdt(struct efi_image_data *e, void **fdt)
 {
 	efi_status_t efiret = EFI_SUCCESS;
-	void *mem = NULL;
+	efi_physical_addr_t mem;
+	void *vmem, *tmp = NULL;
 	const void *of_tree;
 	unsigned long of_size;
 	bool from_fit;
 	int ret;
 
-	from_fit = fdt_is_fit(data);
+	if (IS_ENABLED(CONFIG_EFI_FDT_FORCE)) {
+		e->data->oftree_file = "/efi.fdt";
+		goto efi_fdt;
+	}
 
+	from_fit = fdt_is_fit(e->data);
 	if (from_fit) {
-		ret = fit_open_image(data->os_fit, data->fit_config,
+		ret = fit_open_image(e->data->os_fit, e->data->fit_config,
 				     "fdt", &of_tree, &of_size);
-		if (ret)
+		if (ret) {
+			pr_err("Cannot open FDT image in FIT image: %pe\n",
+			       ERR_PTR(ret));
 			return ret;
+		}
 	}
 
 	if (!from_fit) {
-		if (!data->oftree_file)
+		if (!e->data->oftree_file)
 			return 0;
-
-		pr_info("Loading devicetree from '%s'\n", data->oftree_file);
-		of_tree = read_file(data->oftree_file, &of_size);
+efi_fdt:
+		pr_info("Loading devicetree from '%s'\n", e->data->oftree_file);
+		tmp = read_file(e->data->oftree_file, &of_size);
+		if (!of_tree || of_size <= 0) {
+			pr_err("Failed to read initrd from file: %s\n", e->data->initrd_file);
+			return -EINVAL;
+		}
+		of_tree = tmp;
 	}
 
-	mem = efi_allocate_pages((void *)of_tree, of_size,
+	vmem = efi_allocate_pages(&mem, of_size + CONFIG_FDT_PADDING,
 				 EFI_ALLOCATE_ANY_PAGES,
 				 EFI_ACPI_RECLAIM_MEMORY);
-	if (!mem)
+	if (!vmem) {
+		pr_err("Failed to allocate pages for FDT\n");
+		goto free_file;
 		return -ENOMEM;
-
-	efiret = BS->install_configuration_table(&efi_fdt_guid, 
-			(void *)efi_virt_to_phys(mem));
-	if (EFI_ERROR(efiret)) {
-		ret = -efi_errno(efiret);
-		goto out;
 	}
 
-	*fdt = (void *)efi_virt_to_phys(mem);
+	memcpy(vmem, of_tree, of_size);
 
+	efiret = BS->install_configuration_table(&efi_fdt_guid, 
+			(void *)mem);
+	if (EFI_ERROR(efiret)) {
+		pr_err("Failed to install FDT %s/n", efi_strerror(efiret));
+		ret = -efi_errno(efiret);
+		goto free_mem;
+	}
+
+	e->oftree_res.base = mem;
+	e->oftree_res.size = of_size + CONFIG_FDT_PADDING;
+
+	if (!from_fit && tmp)
+		free(tmp);
+	
+	*fdt = vmem;
+	
 	return 0;
-out:
-	efi_free_pages(mem, of_size);
+
+free_mem:
+	efi_free_pages(vmem, of_size);
+free_file:
+	if (!from_fit && tmp)
+		free(tmp);
+	
 	return ret;
 }
 
-static int efi_dt_fixup(efi_handle_t handle, void **fdt)
+static void efi_unload_fdt(struct efi_image_data *e) {
+	BS->install_configuration_table(&efi_fdt_guid, NULL);
+
+	efi_free_pages(efi_phys_to_virt(e->oftree_res.base),
+				 e->oftree_res.size);
+}
+
+static int efi_dt_fixup(struct efi_image_data *e, void **fdt)
 {
 	efi_status_t efiret = EFI_SUCCESS;
 	int fdt_size;
 	int ret;
 
 	fdt_size = be32_to_cpu(((struct fdt_header *)fdt)->totalsize);
-	efiret = BS->open_protocol(handle, &efi_dt_fixup_protocol_guid,
+	efiret = BS->open_protocol(e->handle, &efi_dt_fixup_protocol_guid,
 				   (void **)fdt, efi_parent_image, NULL,
 				   EFI_OPEN_PROTOCOL_GET_PROTOCOL);
 	if (EFI_ERROR(efiret)) {
@@ -506,29 +614,43 @@ static int efi_dt_fixup(efi_handle_t handle, void **fdt)
 
 static int do_bootm_efi_stub(struct image_data *data)
 {
-	efi_handle_t handle = NULL;
-	struct efi_loaded_image *loaded_image;
+	struct efi_image_data e = {.data = data};
+	enum filetype type;
 	void *fdt;
 	int ret = 0;
 
-	ret = efi_load_os(data, &handle, &loaded_image);
+	ret = efi_load_os(&e);
 	if (ret)
 		return ret;
 
-	ret = efi_load_fdt(data, &fdt);
+	ret = efi_load_fdt(&e, &fdt);
 	if (ret)
-		return ret;
+		goto unload_os;
 
-	ret = efi_load_ramdisk(data);
+	ret = efi_load_ramdisk(&e);
 	if (ret)
-		return ret;
+		goto unload_oftree;
 
+	
 	if (fdt != NULL)
-		efi_dt_fixup(handle, &fdt);
+		efi_dt_fixup(&e, &fdt);
 
-	return efi_execute_image(handle, loaded_image,
-				 file_detect_type(loaded_image->image_base,
-						  PAGE_SIZE));
+	type = file_detect_type(e.loaded_image->image_base, PAGE_SIZE);
+	ret = efi_execute_image(e.handle, e.loaded_image, type);
+	if (ret)
+		goto unload_ramdisk;
+
+	return 0;
+
+unload_ramdisk:
+	if (e.initrd_res)
+		efi_unload_ramdisk(&e);
+unload_oftree:
+	if (fdt)
+		efi_unload_fdt(&e);
+unload_os:
+	efi_unload_os(&e);
+	return ret;
 }
 
 static struct image_handler efi_handle_tr = {

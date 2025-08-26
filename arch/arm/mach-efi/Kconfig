@@ -4,6 +4,7 @@ config EFI_ARM64
 	select CPU_SUPPORTS_64BIT_KERNEL
 	select HAVE_EFI_PAYLOAD
 	select EFI_PAYLOAD
+	select BOOTM_FITIMAGE
     select CLOCKSOURCE_EFI
 	depends on 64BIT
 	default y

@@ -467,16 +467,24 @@ static int efi_load_ramdisk(struct efi_image_data *e)
 	}
 	
 	memcpy(vmem, (void *)initrd, initrd_size);
-
 	e->initrd_res->base = (uint64_t)mem;
 	e->initrd_res->size = (uint64_t)initrd_size;
-	
-	efiret = BS->install_configuration_table(&efi_linux_initrd_media_guid, 
-	(void *)e->initrd_res);
-	if (EFI_ERROR(efiret)) {
-		ret = -efi_errno(efiret);
-		pr_err("Failed to install INITRD %s/n", efi_strerror(efiret));
-		goto free_pages;
+
+	if (IS_ENABLED(CONFIG_EFI_INITRD_INSTALL)) {
+		efiret = BS->install_configuration_table(&efi_linux_initrd_media_guid, 
+		(void *)e->initrd_res);
+		if (EFI_ERROR(efiret)) {
+			ret = -efi_errno(efiret);
+			pr_err("Failed to install INITRD %s/n", efi_strerror(efiret));
+			goto free_pages;
+		}
+	}
+	else {
+		ret = efi_initrd_register(vmem, initrd_size);
+		if (ret) {
+			pr_err("Failed to register INITRD %s/n", strerror(efiret));
+			goto free_pages;
+		}
 	}
 
 	if (!from_fit && tmp)
@@ -496,7 +504,11 @@ free_mem:
 }
 
 static void efi_unload_ramdisk(struct efi_image_data *e) {
-	BS->install_configuration_table(&efi_linux_initrd_media_guid, NULL);
+	
+	if (IS_ENABLED(CONFIG_EFI_INITRD_INSTALL)) 
+		BS->install_configuration_table(&efi_linux_initrd_media_guid, NULL);
+	else
+		efi_initrd_unregister();
 
 	efi_free_pages(efi_phys_to_virt(e->initrd_res->base),
 				 e->initrd_res->size);

@@ -324,24 +324,30 @@ static int do_bootm_efi(struct image_data *data)
 }
 
 static bool ramdisk_is_fit(struct image_data *data) {
+	struct stat st;
 
 	if (bootm_signed_images_are_forced())
 		return true;
-	
-	if (data->initrd_file)
-		return false;
+		
+	if (data->initrd_file) {
+		if (!stat(data->initrd_file, &st) && st.st_size > 0)
+			return false;
+	}
 	
 	return data->os_fit ? (bool)fit_has_image(data->os_fit, 
 			data->fit_config, "ramdisk") : false;
 }
 
 static bool fdt_is_fit(struct image_data *data) {
+	struct stat st;
 
 	if (bootm_signed_images_are_forced())
 		return true;
 	
-	if (data->oftree_file)
-		return false;
+	if (data->oftree_file) {
+		if (!stat(data->initrd_file, &st) && st.st_size > 0)
+			return false;
+	}
 	
 	return data->os_fit ? (bool)fit_has_image(data->os_fit, 
 			data->fit_config, "fdt") : false;

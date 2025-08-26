@@ -279,14 +279,18 @@ static int bootm_open_initrd_uimage(struct image_data *data)
 const struct resource *
 bootm_load_initrd(struct image_data *data, unsigned long load_address)
 {
+	struct stat st;
 	enum filetype type;
 	int ret;
 
 	if (!IS_ENABLED(CONFIG_BOOTM_INITRD))
 		return NULL;
 
-	if (bootm_get_override(&data->initrd_file, bootm_overrides.initrd_file))
-		goto initrd_file;
+	if (bootm_get_override(&data->initrd_file,
+			       bootm_overrides.initrd_file)) {
+		if (!stat(data->initrd_file, &st) && st.st_size > 0)
+			goto initrd_file;
+	}
 
 	if (data->initrd_res)
 		return data->initrd_res;

@@ -36,8 +36,6 @@ static efi_status_t EFIAPI efi_initrd_load_file2(
 {
 	size_t initrd_size;
 
-	pr_info("Anis here we call initrd load file2\n");
-
 	if (!this || this != &efi_lf2_p || !buffer_size)
 		return EFI_INVALID_PARAMETER;
 

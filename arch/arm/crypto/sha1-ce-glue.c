@@ -88,12 +88,6 @@ static struct digest_algo m = {
 
 static int sha1_ce_mod_init(void)
 {
-	uint64_t isar0;
-
-	asm volatile("mrs %0, ID_AA64ISAR0_EL1" : "=r"(isar0));
-	if (!(isar0 & 0xF00))
-		return -EOPNOTSUPP;
-
 	return digest_algo_register(&m);
 }
 coredevice_initcall(sha1_ce_mod_init);

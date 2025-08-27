@@ -46,6 +46,8 @@ static struct public_key *public_key_dup(const struct public_key *key)
 	k->type = key->type;
 	if (key->key_name_hint)
 		k->key_name_hint = xstrdup(key->key_name_hint);
+	k->hash = xmemdup(key->hash, key->hashlen);
+	k->hashlen = key->hashlen;
 
 	switch (key->type) {
 	case PUBLIC_KEY_TYPE_RSA:
@@ -94,8 +96,10 @@ static int init_public_keys(void)
 	for (iter = __public_keys_start; iter != __public_keys_end; iter++) {
 		struct public_key *key = public_key_dup(iter);
 
-		if (!key)
+		if (!key) {
+			pr_warn("error while adding key\n");
 			continue;
+		}
 
 		public_key_add(key);
 	}

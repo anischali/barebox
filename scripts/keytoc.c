@@ -452,6 +452,45 @@ static EVP_PKEY *reimport_key(EVP_PKEY *pkey)
 	return pkey_out;
 }
 
+static int print_hash(EVP_PKEY *key)
+{
+	int i, ret;
+	BIO *mem;
+	BUF_MEM *p;
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	SHA256_CTX sha256;
+	mem = BIO_new(BIO_s_mem());
+
+	ret = i2d_PUBKEY_bio(mem, key);
+	if (ret != 1)
+		goto err;
+
+	BIO_get_mem_ptr(mem, &p);
+
+	ret = SHA256_Init(&sha256);
+	if (ret != 1)
+		goto err;
+
+	ret = SHA256_Update(&sha256, p->data, p->length);
+	if (ret != 1)
+		goto err;
+
+	ret = SHA256_Final(hash, &sha256);
+	if (ret != 1)
+		goto err;
+
+	for (i = 0; i < SHA256_DIGEST_LENGTH; i++)
+		fprintf(outfilep, "0x%02x, ", hash[i]);
+
+	fprintf(outfilep, "\n");
+
+	ret = 0;
+err:
+	BIO_free(mem);
+
+	return ret ? -EINVAL : 0;
+}
+
 static int gen_key_ecdsa(EVP_PKEY *key, const char *key_name, const char *key_name_c)
 {
 	char group[128];
@@ -482,6 +521,14 @@ static int gen_key_ecdsa(EVP_PKEY *key, const char *key_name, const char *key_na
 		fprintf(stderr, "ERROR: generating a dts snippet for ECDSA keys is not yet supported\n");
 		return -EOPNOTSUPP;
 	} else {
+		fprintf(outfilep, "\nstatic unsigned char %s_hash[] = {\n\t", key_name_c);
+
+		ret = print_hash(key);
+		if (ret)
+			return ret;
+
+		fprintf(outfilep, "\n};\n\n");
+
 		fprintf(outfilep, "\nstatic uint64_t %s_x[] = {", key_name_c);
 		ret = print_bignum(key_x, bits, 64);
 		if (ret)
@@ -506,6 +553,8 @@ static int gen_key_ecdsa(EVP_PKEY *key, const char *key_name, const char *key_na
 			fprintf(outfilep, "\nstruct public_key __attribute__((section(\".public_keys.rodata.%s\"))) %s_public_key = {\n", key_name_c, key_name_c);
 			fprintf(outfilep, "\t.type = PUBLIC_KEY_TYPE_ECDSA,\n");
 			fprintf(outfilep, "\t.key_name_hint = \"%s\",\n", key_name);
+			fprintf(outfilep, "\t.hash = %s_hash,\n", key_name_c);
+			fprintf(outfilep, "\t.hashlen = %u,\n", SHA256_DIGEST_LENGTH);
 			fprintf(outfilep, "\t.ecdsa = &%s,\n", key_name_c);
 			fprintf(outfilep, "};\n");
 		}
@@ -568,6 +617,14 @@ static int gen_key_rsa(EVP_PKEY *key, const char *key_name, const char *key_name
 		fprintf(outfilep, "\t\t\tkey-name-hint = \"%s\";\n", key_name_c);
 		fprintf(outfilep, "\t\t};\n");
 	} else {
+		fprintf(outfilep, "\nstatic unsigned char %s_hash[] = {\n\t", key_name_c);
+
+		ret = print_hash(key);
+		if (ret)
+			return ret;
+
+		fprintf(outfilep, "\n};\n\n");
+
 		fprintf(outfilep, "\nstatic uint32_t %s_modulus[] = {", key_name_c);
 		ret = print_bignum(modulus, bits, 32);
 		if (ret)
@@ -600,6 +657,8 @@ static int gen_key_rsa(EVP_PKEY *key, const char *key_name, const char *key_name
 			fprintf(outfilep, "\nstruct public_key __attribute__((section(\".public_keys.rodata.%s\"))) %s_public_key = {\n", key_name_c, key_name_c);
 			fprintf(outfilep, "\t.type = PUBLIC_KEY_TYPE_RSA,\n");
 			fprintf(outfilep, "\t.key_name_hint = \"%s\",\n", key_name);
+			fprintf(outfilep, "\t.hash = %s_hash,\n", key_name_c);
+			fprintf(outfilep, "\t.hashlen = %u,\n", SHA256_DIGEST_LENGTH);
 			fprintf(outfilep, "\t.rsa = &%s,\n", key_name_c);
 			fprintf(outfilep, "};\n");
 		}
@@ -651,6 +710,34 @@ static int gen_key(const char *keyname, const char *path)
 		ret = gen_key_rsa(key, keyname, key_name_c);
 
 	return ret;
+}
+
+static void get_name_path(const char *keyspec, char **keyname, char **path)
+{
+	char *sep, *spec;
+
+	spec = strdup(keyspec);
+	if (!spec)
+		enomem_exit(__func__);
+
+	/* Split <key-hint>:<key-path> pair, <key-hint> is optional */
+	sep = strchr(spec, ':');
+	if (!sep) {
+		*path = spec;
+		return;
+	}
+
+	*sep = 0;
+	*keyname = strdup(spec);
+	if (!*keyname)
+		enomem_exit(__func__);
+
+	sep++;
+	*path = strdup(sep);
+	if (!*path)
+		enomem_exit(__func__);
+
+	free(spec);
 }
 
 int main(int argc, char *argv[])
@@ -705,35 +792,31 @@ int main(int argc, char *argv[])
 	}
 
 	for (i = optind; i < argc; i++) {
-		char *keyspec = argv[i];
+		const char *keyspec = argv[i];
 		char *keyname = NULL;
-		char *path, *freep = NULL;
+		char *path = NULL;
 
-		if (!strncmp(keyspec, "pkcs11:", 7)) {
-			path = keyspec;
-		} else {
-			path = strchr(keyspec, ':');
-			if (path) {
-				*path = 0;
-				path++;
-				keyname = keyspec;
-			} else {
-				path = keyspec;
-			}
-		}
+		keyspec = try_resolve_env(keyspec);
+		if (!keyspec)
+			exit(1);
+
+		if (!strncmp(keyspec, "pkcs11:", 7))
+			path = strdup(keyspec);
+		else
+			get_name_path(keyspec, &keyname, &path);
 
 		if (!keyname) {
-			ret = asprintf(&freep, "key_%d", keynum++);
+			ret = asprintf(&keyname, "key_%d", keynum++);
 			if (ret < 0)
 				enomem_exit("asprintf");
-			keyname = freep;
 		}
 
 		ret = gen_key(keyname, path);
 		if (ret)
 			exit(1);
 
-		free(freep);
+		free(keyname);
+		free(path);
 	}
 
 	if (dts) {

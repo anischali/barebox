@@ -116,6 +116,12 @@ static struct digest_algo sha256 = {
 
 static int sha256_ce_digest_register(void)
 {
+	uint64_t isar0;
+
+	asm volatile("mrs %0, ID_AA64ISAR0_EL1" : "=r"(isar0));
+	if (!(isar0 & 0xF000))
+		return -EOPNOTSUPP;
+
 	return digest_algo_register(&sha256);
 }
 coredevice_initcall(sha256_ce_digest_register);

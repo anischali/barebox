@@ -10,6 +10,7 @@
 #include <efi/efi-payload.h>
 #include <pbl.h>
 #include <pbl/handoff-data.h>
+#include <mach/efi/lowlevel.h>
 
 asmlinkage void __efistub_efi_pe_entry(void *image, struct efi_system_table *sys_table);
 
@@ -26,6 +27,8 @@ void __efistub_efi_pe_entry(void *image, struct efi_system_table *sys_table)
 	size_t memsize;
 	void *mem;
 	static struct barebox_efi_data efidata;
+
+	efi_lowlevel_init();
 
 #ifdef DEBUG
 	sys_table->con_out->output_string(sys_table->con_out, L"\nbarebox\n");

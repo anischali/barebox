@@ -6,6 +6,7 @@ config EFI_ARM64
 	select EFI_PAYLOAD
 	select BOOTM_FITIMAGE
     select CLOCKSOURCE_EFI
+    select DRIVER_VIDEO_EFI_GOP
 	depends on 64BIT
 	default y
 

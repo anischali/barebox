@@ -803,7 +803,7 @@ char *device_path_to_partuuid(const struct efi_device_path *dev_path)
 			(struct efi_device_path_hard_drive_path *)dev_path;
 
 		if (hd->signature_type != SIGNATURE_TYPE_GUID &&
-			hd->signature_type != SIGNATURE_TYPE_MBR)
+		    hd->signature_type != SIGNATURE_TYPE_MBR)
 			continue;
 
 		return xasprintf("%pUl", (efi_guid_t *)&(hd->signature[0]));

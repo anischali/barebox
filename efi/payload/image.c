@@ -523,19 +523,18 @@ static void efi_unload_ramdisk(struct efi_image_data *e) {
 	e->initrd_res = NULL;
 }
 
-static int efi_load_fdt(struct efi_image_data *e, void **fdt)
+static int efi_load_fdt(struct efi_image_data *e)
 {
 	efi_status_t efiret = EFI_SUCCESS;
 	efi_physical_addr_t mem;
 	void *vmem, *tmp = NULL;
 	const void *of_tree;
 	unsigned long of_size;
-	bool from_fit = false;
-	int ret = 0;
+	bool from_fit;
+	int ret;
 
 	if (IS_ENABLED(CONFIG_EFI_FDT_FORCE)) {
-		e->data->oftree_file = "/efi.fdt";
-		goto efi_fdt;
+		return 0;
 	}
 
 	from_fit = fdt_is_fit(e->data);
@@ -552,7 +551,7 @@ static int efi_load_fdt(struct efi_image_data *e, void **fdt)
 	if (!from_fit) {
 		if (!e->data->oftree_file)
 			return 0;
-efi_fdt:
+		
 		pr_info("Loading devicetree from '%s'\n", e->data->oftree_file);
 		tmp = read_file(e->data->oftree_file, &of_size);
 		if (!tmp || of_size <= 0) {
@@ -587,7 +586,6 @@ efi_fdt:
 	if (!from_fit && tmp)
 		free(tmp);
 	
-	*fdt = vmem;
 	
 	return 0;
 
@@ -607,51 +605,23 @@ static void efi_unload_fdt(struct efi_image_data *e) {
 				 e->oftree_res.size);
 }
 
-static int efi_dt_fixup(struct efi_image_data *e, void **fdt)
-{
-	efi_status_t efiret = EFI_SUCCESS;
-	int fdt_size;
-	int ret;
-
-	fdt_size = be32_to_cpu(((struct fdt_header *)fdt)->totalsize);
-	efiret = BS->open_protocol(e->handle, &efi_dt_fixup_protocol_guid,
-				   (void **)fdt, efi_parent_image, NULL,
-				   EFI_OPEN_PROTOCOL_GET_PROTOCOL);
-	if (EFI_ERROR(efiret)) {
-		pr_err("failed to OpenProtocol %s: %s\n",
-		       efi_guid_string(
-			       (efi_guid_t *)&efi_dt_fixup_protocol_guid),
-		       efi_strerror(efiret));
-
-		ret = -efi_errno(efiret);
-		return ret;
-	}
-
-	return 0;
-}
-
 static int do_bootm_efi_stub(struct image_data *data)
 {
 	struct efi_image_data e = {.data = data};
 	enum filetype type;
-	void *fdt;
 	int ret = 0;
 
 	ret = efi_load_os(&e);
 	if (ret)
 		return ret;
 
-	ret = efi_load_fdt(&e, &fdt);
+	ret = efi_load_fdt(&e);
 	if (ret)
 		goto unload_os;
 
 	ret = efi_load_ramdisk(&e);
 	if (ret)
 		goto unload_oftree;
-
-	
-	if (fdt != NULL)
-		efi_dt_fixup(&e, &fdt);
 
 	type = file_detect_type(e.loaded_image->image_base, PAGE_SIZE);
 	ret = efi_execute_image(e.handle, e.loaded_image, type);
@@ -664,8 +634,7 @@ unload_ramdisk:
 	if (e.initrd_res)
 		efi_unload_ramdisk(&e);
 unload_oftree:
-	if (fdt)
-		efi_unload_fdt(&e);
+	efi_unload_fdt(&e);
 unload_os:
 	efi_unload_os(&e);
 	return ret;

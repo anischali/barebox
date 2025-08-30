@@ -122,7 +122,7 @@ static void efi_free_pages(void *_mem, size_t size)
 		BS->free_pages(mem, DIV_ROUND_UP(size, EFI_PAGE_SIZE));
 }
 
-static int efi_load_file_image(const char *file,
+static int efi_load_file_image(bool boot_policy, const char *file,
 			       struct efi_loaded_image **loaded_image,
 			       efi_handle_t *h)
 {
@@ -146,7 +146,7 @@ static int efi_load_file_image(const char *file,
 
 	memcpy(exe, buf, size);
 
-	efiret = BS->load_image(false, efi_parent_image, efi_device_path, exe,
+	efiret = BS->load_image(boot_policy, efi_parent_image, efi_device_path, exe,
 				size, &handle);
 	if (EFI_ERROR(efiret)) {
 		pr_err("failed to LoadImage: %s\n", efi_strerror(efiret));
@@ -255,7 +255,7 @@ static int do_bootm_efi(struct image_data *data)
 	struct efi_loaded_image *loaded_image;
 	struct linux_kernel_header *image_header, *boot_header;
 
-	ret = efi_load_file_image(data->os_file, &loaded_image, &handle);
+	ret = efi_load_file_image(false, data->os_file, &loaded_image, &handle);
 	if (ret)
 		return ret;
 
@@ -367,7 +367,7 @@ static int efi_load_os(struct efi_image_data *e)
 		image_size = e->data->fit_kernel_size;
 	}
 	else if (e->data->os_file)
-		return efi_load_file_image(e->data->os_file, &e->loaded_image, &e->handle);
+		return efi_load_file_image(true, e->data->os_file, &e->loaded_image, &e->handle);
 
 	vmem = efi_allocate_pages(&mem, image_size, EFI_ALLOCATE_ANY_PAGES,
 				 EFI_LOADER_CODE);
@@ -378,7 +378,7 @@ static int efi_load_os(struct efi_image_data *e)
 
 	memcpy(vmem, image, image_size);
 
-	efiret = BS->load_image(false, efi_parent_image, efi_device_path, image,
+	efiret = BS->load_image(true, efi_parent_image, efi_device_path, image,
 				image_size, &e->handle);
 	if (EFI_ERROR(efiret)) {
 		ret = -efi_errno(efiret);
@@ -530,8 +530,8 @@ static int efi_load_fdt(struct efi_image_data *e, void **fdt)
 	void *vmem, *tmp = NULL;
 	const void *of_tree;
 	unsigned long of_size;
-	bool from_fit;
-	int ret;
+	bool from_fit = false;
+	int ret = 0;
 
 	if (IS_ENABLED(CONFIG_EFI_FDT_FORCE)) {
 		e->data->oftree_file = "/efi.fdt";
@@ -555,7 +555,7 @@ static int efi_load_fdt(struct efi_image_data *e, void **fdt)
 efi_fdt:
 		pr_info("Loading devicetree from '%s'\n", e->data->oftree_file);
 		tmp = read_file(e->data->oftree_file, &of_size);
-		if (!of_tree || of_size <= 0) {
+		if (!tmp || of_size <= 0) {
 			pr_err("Failed to read initrd from file: %s\n", e->data->initrd_file);
 			return -EINVAL;
 		}
@@ -689,7 +689,7 @@ static int efi_execute(struct binfmt_hook *b, char *file, int argc, char **argv)
 	efi_handle_t handle;
 	struct efi_loaded_image *loaded_image;
 
-	ret = efi_load_file_image(file, &loaded_image, &handle);
+	ret = efi_load_file_image(false, file, &loaded_image, &handle);
 	if (ret)
 		return ret;
 

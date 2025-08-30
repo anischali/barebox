@@ -1,1 +1,1 @@
-pbl-y := lowlevel.o
+obj- := __dummy__.o

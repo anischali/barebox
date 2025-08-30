@@ -8,6 +8,10 @@
 #ifndef __ASSEMBLY__
 
 void arm_cpu_lowlevel_init(void);
+#ifdef CONFIG_ARMV8_SWITCH_EL
+void armv8_switch_to_el1(void);
+void armv8_switch_to_el2(void);
+#endif
 void cortex_a7_lowlevel_init(void);
 
 /*

@@ -43,6 +43,10 @@ config ARM_LINUX
 	default y
 	depends on CMD_BOOTZ || CMD_BOOTU || BOOTM
 
+config ARMV8_SWITCH_EL
+	bool
+	default y if HAVE_EFI_PAYLOAD 
+
 menu "System Type"
 
 config ARCH_STM32

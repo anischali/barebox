@@ -28,8 +28,6 @@ void __efistub_efi_pe_entry(void *image, struct efi_system_table *sys_table)
 	void *mem;
 	static struct barebox_efi_data efidata;
 
-	efi_lowlevel_init();
-
 #ifdef DEBUG
 	sys_table->con_out->output_string(sys_table->con_out, L"\nbarebox\n");
 #endif

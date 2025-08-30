@@ -5,5 +5,9 @@
 
 
 void efi_lowlevel_init(void) {
-    arm_cpu_lowlevel_init();
+
+#ifdef CONFIG_ARMV8_SWITCH_EL
+    if (current_el() == 2)
+        armv8_switch_to_el1();
+#endif
 }

@@ -12,6 +12,10 @@ else
 	riscv-ldflags-y += -melf64lriscv
 endif
 
+multi_rv64i_efi_defconfig:
+	$(call merge_into_defconfig,rv64i_defconfig,efi-payload)
+generated_configs += multi_rv64i_efi_defconfig
+
 # ISA string setting
 riscv-march-$(CONFIG_ARCH_RV32I)	:= rv32im
 riscv-march-$(CONFIG_ARCH_RV64I)	:= rv64im

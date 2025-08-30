@@ -122,6 +122,18 @@ config RISCV_M_MODE
 config RISCV_S_MODE
 	bool
 
+config EFI_RISCV
+	bool "EFI on ARM64"
+	select HAVE_EFI_PAYLOAD
+	select EFI_PAYLOAD
+	select HAVE_EFI_STUB
+	select EFI_STUB
+	select BOOTM_FITIMAGE
+    select CLOCKSOURCE_EFI
+    select DRIVER_VIDEO_EFI_GOP
+	depends on 64BIT
+	default y if ARCH_RV64I
+
 config RISCV_MULTI_MODE
 	def_bool RISCV_S_MODE && RISCV_M_MODE
 

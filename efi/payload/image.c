@@ -652,6 +652,12 @@ static struct image_handler efi_arm64_handle_tr = {
 	.filetype = filetype_arm64_efi_linux_image,
 };
 
+static struct image_handler efi_riscv_handle_tr = {
+	.name = "EFI RISCV Linux kernel",
+	.bootm = do_bootm_efi_stub,
+	.filetype = filetype_riscv_efi_linux_image,
+};
+
 static int efi_execute(struct binfmt_hook *b, char *file, int argc, char **argv)
 {
 	int ret;
@@ -695,6 +701,11 @@ static struct binfmt_hook binfmt_arm64_efi_hook = {
 	.hook = efi_execute,
 };
 
+static struct binfmt_hook binfmt_riscv_efi_hook = {
+	.type = filetype_riscv_efi_linux_image,
+	.hook = efi_execute,
+};
+
 static int efi_register_image_handler(void)
 {
 	register_image_handler(&efi_handle_tr);
@@ -706,6 +717,11 @@ static int efi_register_image_handler(void)
 	if (IS_ENABLED(CONFIG_ARM64)) {
 		register_image_handler(&efi_arm64_handle_tr);
 		binfmt_register(&binfmt_arm64_efi_hook);
+	}
+
+	if (IS_ENABLED(CONFIG_RISCV)) {
+		register_image_handler(&efi_riscv_handle_tr);
+		binfmt_register(&binfmt_riscv_efi_hook);
 	}
 
 	return 0;

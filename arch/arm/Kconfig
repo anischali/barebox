@@ -254,18 +254,6 @@ config ARCH_ZYNQMP
 	select GPIOLIB
 	select HAS_MACB
 
-config EFI_ARM64
-	bool "EFI on ARM64"
-	select CPU_V8
-	select CPU_SUPPORTS_64BIT_KERNEL
-	select HAVE_EFI_PAYLOAD
-	select EFI_PAYLOAD
-	select BOOTM_FITIMAGE
-    select CLOCKSOURCE_EFI
-    select DRIVER_VIDEO_EFI_GOP
-	depends on 64BIT
-	default y if ARCH_MULTIARCH
-
 source "arch/arm/cpu/Kconfig"
 source "arch/arm/mach-at91/Kconfig"
 source "arch/arm/mach-bcm283x/Kconfig"

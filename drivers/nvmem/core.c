@@ -718,9 +718,8 @@ struct nvmem_cell *of_nvmem_cell_get(struct device_node *np, const char *id)
 	struct nvmem_cell_entry *cell_entry;
 	struct nvmem_cell *cell;
 	struct of_phandle_args cell_spec;
-	int index = 0;
+	int ret, index = 0;
 	int cell_index = 0;
-	int ret;
 
 	/* if cell name exists, find index to the name */
 	if (id)

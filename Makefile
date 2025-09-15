@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 2025
-PATCHLEVEL = 07
+PATCHLEVEL = 08
 SUBLEVEL = 0
 EXTRAVERSION =
 NAME = None
@@ -829,6 +829,7 @@ images/%: $(BAREBOX_PROPER) FORCE
 
 ifdef CONFIG_PBL_IMAGE
 SYMLINK_TARGET_barebox.efi = images/barebox-dt-2nd.img
+SYMLINK_DEP_barebox.efi = images
 symlink-$(CONFIG_EFI_STUB) += barebox.efi
 all: $(BAREBOX_PROPER) images
 else
@@ -840,8 +841,8 @@ endif
 all: $(symlink-y)
 
 .SECONDEXPANSION:
-$(symlink-y): $$(SYMLINK_TARGET_$$(@F)) FORCE
-	$(call if_changed,symlink_quiet)
+$(symlink-y): $$(or $$(SYMLINK_DEP_$$(@F)),$$(SYMLINK_TARGET_$$(@F))) FORCE
+	@ln -fsn --relative $(SYMLINK_TARGET_$(@F)) $@
 
 common-$(CONFIG_PBL_IMAGE)	+= pbl/
 common-$(CONFIG_DEFAULT_ENVIRONMENT) += defaultenv/
@@ -1187,14 +1188,9 @@ ifneq ($(dtstree),)
 
 PHONY += dtbs dtbs_prepare
 dtbs: dtbs_prepare
-	$(Q)$(MAKE) $(build)=$(dtstree) need-dtbslist=1
+	$(Q)$(MAKE) $(build)=$(dtstree)
 
 dtbs_prepare: include/config/kernel.release scripts_dtc
-
-ifdef CONFIG_OFDEVICE
-images: dtbs
-images/%: dtbs
-endif
 
 endif
 

@@ -8,7 +8,10 @@
 #include <clock.h>
 #include <common.h>
 #include <linux/sizes.h>
+#include <linux/ktime.h>
 #include <memory.h>
+#include <command.h>
+#include <magicvar.h>
 #include <init.h>
 #include <driver.h>
 #include <io.h>
@@ -16,9 +19,11 @@
 #include <malloc.h>
 #include <string.h>
 #include <linux/err.h>
-#include <bootargs.h>
+#include <boot.h>
+#include <bootm.h>
 #include <fs.h>
 #include <libfile.h>
+#include <binfmt.h>
 #include <wchar.h>
 #include <image-fit.h>
 #include <efi/efi-payload.h>
@@ -27,9 +32,28 @@
 #include "image.h"
 #include "setup_header.h"
 
-static void *efi_read_file(const char *file, size_t *size)
+struct efi_mem_resource {
+	efi_physical_addr_t base;
+	size_t size;
+} __attribute__ ((packed));
+
+struct efi_image_data {
+	struct image_data *data;
+
+	efi_handle_t handle;
+	struct efi_loaded_image *loaded_image;
+
+	struct efi_mem_resource image_res;
+	struct efi_mem_resource oftree_res;
+	struct efi_mem_resource *initrd_res;
+};
+
+
+static void *efi_allocate_pages(efi_physical_addr_t *mem,
+				size_t size,
+				enum efi_allocate_type allocate_type,
+				enum efi_memory_type mem_type)
 {
-	efi_physical_addr_t mem;
 	efi_status_t efiret;
 
 	efiret = BS->allocate_pages(allocate_type, mem_type,
@@ -55,8 +79,6 @@ static void efi_free_pages(void *_mem, size_t size)
 static int efi_load_file_image(const char *file,
 			       struct efi_loaded_image **loaded_image,
 			       efi_handle_t *h)
-int efi_load_image(const char *file, struct efi_loaded_image **loaded_image,
-		   efi_handle_t *h)
 {
 	efi_physical_addr_t mem;
 	void *exe;
@@ -111,68 +133,11 @@ free_buf:
 	return ret;
 }
 
-static bool is_linux_image(enum filetype filetype, const void *base)
-{
-	if (IS_ENABLED(CONFIG_X86) && is_x86_setup_header(base))
-		return true;
-
-	if (IS_ENABLED(CONFIG_ARM64) &&
-	    filetype == filetype_arm64_efi_linux_image)
-		return true;
-
-	return false;
-}
-
-static int efi_execute_image(efi_handle_t handle,
-			     struct efi_loaded_image *loaded_image,
-			     enum filetype filetype)
-int efi_execute_image(efi_handle_t handle,
-		      struct efi_loaded_image *loaded_image,
-		      enum filetype filetype)
-{
-	efi_status_t efiret;
-	const char *options;
-	bool is_driver;
-
-	is_driver =
-		(loaded_image->image_code_type == EFI_BOOT_SERVICES_CODE) ||
-		(loaded_image->image_code_type == EFI_RUNTIME_SERVICES_CODE);
-
-	if (is_linux_image(filetype, loaded_image->image_base)) {
-		pr_debug("Linux kernel detected. Adding bootargs.");
-		options = linux_bootargs_get();
-		pr_info("add linux options '%s'\n", options);
-		if (options) {
-			loaded_image->load_options =
-				xstrdup_char_to_wchar(options);
-			loaded_image->load_options_size =
-				(strlen(options) + 1) * sizeof(wchar_t);
-		}
-		shutdown_barebox();
-	}
-
-	efi_pause_devices();
-
-	efiret = BS->start_image(handle, NULL, NULL);
-	if (EFI_ERROR(efiret))
-		pr_err("failed to StartImage: %s\n", efi_strerror(efiret));
-
-	efi_continue_devices();
-
-	if (!is_driver)
-		BS->unload_image(handle);
-
-	efi_connect_all();
-	efi_register_devices();
-
-	return -efi_errno(efiret);
-}
-
-typedef void (*handover_fn)(void *image, struct efi_system_table *table,
-			    struct linux_kernel_header *header);
+typedef void(*handover_fn)(void *image, struct efi_system_table *table,
+		struct x86_setup_header *header);
 
 static inline void linux_efi_handover(efi_handle_t handle,
-				      struct linux_kernel_header *header)
+		struct x86_setup_header *header)
 {
 	handover_fn handover;
 	uintptr_t addr;
@@ -194,13 +159,13 @@ static int do_bootm_efi(struct image_data *data)
 	int ret;
 	const char *options;
 	struct efi_loaded_image *loaded_image;
-	struct linux_kernel_header *image_header, *boot_header;
+	struct x86_setup_header *image_header, *boot_header;
 
 	ret = efi_load_file_image(data->os_file, &loaded_image, &handle);
 	if (ret)
 		return ret;
 
-	image_header = (struct linux_kernel_header *)loaded_image->image_base;
+	image_header = (struct x86_setup_header *)loaded_image->image_base;
 
 	if (image_header->boot_flag != 0xAA55 ||
 	    image_header->header != 0x53726448 ||
@@ -236,9 +201,8 @@ static int do_bootm_efi(struct image_data *data)
 		boot_header->cmdline_size = strlen(options);
 	}
 
-	boot_header->code32_start =
-		efi_virt_to_phys(loaded_image->image_base +
-				 (image_header->setup_sects + 1) * 512);
+	boot_header->code32_start = efi_virt_to_phys(loaded_image->image_base +
+			(image_header->setup_sects+1) * 512);
 
 	if (bootm_verbose(data)) {
 		printf("\nStarting kernel at 0x%p", loaded_image->image_base);
@@ -370,12 +334,9 @@ static int efi_load_ramdisk(struct efi_image_data *e)
 	efi_status_t efiret = EFI_SUCCESS;
 	const void *initrd;
 	unsigned long initrd_size;
-	bool from_fit;
 	int ret;
 
-	from_fit = ramdisk_is_fit(e->data);
-
-	if (from_fit) {
+	if (ramdisk_is_fit(e->data)) {
 		ret = fit_open_image(e->data->os_fit, e->data->fit_config,
 				     "ramdisk", &initrd, &initrd_size);
 		if (ret) {
@@ -383,9 +344,7 @@ static int efi_load_ramdisk(struct efi_image_data *e)
 			       ERR_PTR(ret));
 			return ret;
 		}
-	}
-
-	if (!from_fit) {
+	} else {
 		if (!e->data->initrd_file)
 			return 0;
 
@@ -439,8 +398,7 @@ static int efi_load_ramdisk(struct efi_image_data *e)
 		}
 	}
 
-	if (!from_fit && tmp)
-		free(tmp);
+	free(tmp);
 
 	return 0;
 
@@ -449,8 +407,7 @@ free_pages:
 free_pool:
 	BS->free_pool(e->initrd_res);
 free_mem:
-	if (!from_fit && tmp)
-		free(tmp);
+	free(tmp);
 
 	return ret;
 }
@@ -478,14 +435,12 @@ static int efi_load_fdt(struct efi_image_data *e)
 	void *vmem, *tmp = NULL;
 	const void *of_tree;
 	unsigned long of_size;
-	bool from_fit;
 	int ret;
 
 	if (IS_ENABLED(CONFIG_EFI_FDT_FORCE))
 		return 0;
 
-	from_fit = fdt_is_fit(e->data);
-	if (from_fit) {
+	if (fdt_is_fit(e->data)) {
 		ret = fit_open_image(e->data->os_fit, e->data->fit_config,
 				     "fdt", &of_tree, &of_size);
 		if (ret) {
@@ -493,9 +448,7 @@ static int efi_load_fdt(struct efi_image_data *e)
 			       ERR_PTR(ret));
 			return ret;
 		}
-	}
-
-	if (!from_fit) {
+	} else {
 		if (!e->data->oftree_file)
 			return 0;
 
@@ -531,16 +484,14 @@ static int efi_load_fdt(struct efi_image_data *e)
 	e->oftree_res.base = mem;
 	e->oftree_res.size = SZ_128K;
 
-	if (!from_fit)
-		free(tmp);
+	free(tmp);
 
 	return 0;
 
 free_mem:
 	efi_free_pages(vmem, SZ_128K);
 free_file:
-	if (!from_fit)
-		free(tmp);
+	free(tmp);
 
 	return ret;
 }
@@ -555,7 +506,7 @@ static void efi_unload_fdt(struct efi_image_data *e)
 
 static int do_bootm_efi_stub(struct image_data *data)
 {
-	struct efi_image_data e = {.data = data};
+	struct efi_image_data e = { .data = data };
 	enum filetype type;
 	int ret = 0;
 

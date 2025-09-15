@@ -6,7 +6,7 @@ config HAVE_EFI_PAYLOAD
 	bool
 
 config EFI_PAYLOAD
-	bool "Build as EFI payload" if COMPILE_TEST
+	bool "Build as EFI payload"
 	depends on HAVE_EFI_PAYLOAD
 	select PBL_FULLY_PIC if ARM64
 	select EFI
@@ -17,6 +17,10 @@ config EFI_PAYLOAD
 	select BLOCK
 	select PARTITION_DISK
 	select HW_HAS_PCI
+
+if EFI_PAYLOAD
+source "efi/payload/Kconfig"
+endif
 
 config EFI
 	bool
@@ -49,5 +53,22 @@ config EFI_PAYLOAD_DEFAULT_PATH
 	default "EFI/BOOT/BAREBOX.EFI"
 
 endif
+
+config EFI_FDT_FORCE
+	bool "Force EFI provided FDT"
+	default n
+	help
+	  with this options we keep the fdt passed by EFI in the
+	  system configuration table, EFI has to suppot FDT otherwise
+	  an empty fdt will be generated when linux boots by efi.
+
+config EFI_INITRD_INSTALL
+	bool "Install the initramfs by barebox"
+	default n
+	help
+	  with this option barebox will install the initrd to the
+	  system configuration table, same as what kernel do after
+	  calling read file2 boot services, in this case the initrd
+	  will be read directly by the kernel as an initramfs.
 
 endmenu

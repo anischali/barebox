@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
 config EFI_HANDOVER_PROTOCOL
+	bool "EFI Handover protocol"
 	def_bool X86
 
 config EFI_PAYLOAD_BOOTM
-	def_bool !EFI_HANDOVER_PROTOCOL
+	bool "EFI bootm protocol"
+	depends on !EFI_HANDOVER_PROTOCOL
+	select BOOTM_FITIMAGE

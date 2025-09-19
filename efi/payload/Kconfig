@@ -2,9 +2,10 @@
 
 config EFI_HANDOVER_PROTOCOL
 	bool "EFI Handover protocol"
-	def_bool X86
+	def_bool !EFI_PAYLOAD_BOOTM
 
 config EFI_PAYLOAD_BOOTM
 	bool "EFI bootm protocol"
-	depends on !EFI_HANDOVER_PROTOCOL
+	def_bool y
 	select BOOTM_FITIMAGE
+	select MALLOC_EFI

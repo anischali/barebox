@@ -24,6 +24,25 @@
 #ifdef CONFIG_MALLOC_TLSF
 void *malloc_add_pool(void *mem, size_t bytes);
 #endif
+void *efi_malloc(size_t size);
+void efi_free(void *ptr);
+void *efi_realloc(void *ptr, size_t size);
+#ifdef MALLOC_EFI
+static inline void *efi_malloc(size_t size)
+{
+	errno = -ENOMEM;
+	return NULL;
+}
+
+static inline void efi_free(void *ptr) {}
+
+static inline void *efi_realloc(void *ptr, size_t size)
+{
+	errno = -ENOMEM;
+	return NULL;
+}
+#else
+#endif
 
 #if IN_PROPER
 void *malloc(size_t) __alloc_size(1);

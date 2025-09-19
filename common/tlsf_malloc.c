@@ -6,6 +6,8 @@
  */
 
 #include <malloc.h>
+#include <efi.h>
+#include <memory.h>
 #include <string.h>
 
 #include <stdio.h>
@@ -29,8 +31,12 @@ void *malloc(size_t bytes)
 	void *mem;
 
 	mem = tlsf_malloc(tlsf_mem_pool, bytes);
-	if (!mem)
+	if (!mem) {
+		if (IS_ENABLED(CONFIG_MALLOC_EFI))
+			return efi_malloc(bytes);
+
 		errno = ENOMEM;
+	}
 
 	return mem;
 }
@@ -38,6 +44,14 @@ EXPORT_SYMBOL(malloc);
 
 void free(void *mem)
 {
+	if (IS_ENABLED(CONFIG_MALLOC_EFI)) {
+		if (efi_virt_to_phys(mem) < mem_malloc_start() &&
+			efi_virt_to_phys(mem) > mem_malloc_end()) {
+			efi_free(mem);
+			return;
+		}
+	}
+
 	tlsf_free(tlsf_mem_pool, mem);
 }
 EXPORT_SYMBOL(free);
@@ -51,8 +65,12 @@ EXPORT_SYMBOL(malloc_usable_size);
 void *realloc(void *oldmem, size_t bytes)
 {
 	void *mem = tlsf_realloc(tlsf_mem_pool, oldmem, bytes);
-	if (!mem)
+	if (!mem) {
+		if (IS_ENABLED(CONFIG_MALLOC_EFI))
+			return efi_realloc(oldmem, bytes);
+
 		errno = ENOMEM;
+	}
 
 	return mem;
 }

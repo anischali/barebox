@@ -317,6 +317,15 @@ config EXPERIMENTAL
 	bool
 	prompt "Prompt for experimental code"
 
+config MALLOC_EFI
+	bool "efi malloc fallback"
+	depends on EFI_PAYLOAD
+	help
+	  select this option to use efi malloc fallback, it will permit,
+	  when we use barebox as an efi payload to automaticlly allocate
+	  more memory from efi as needed, permits to be more resilient with
+	  OOM and support what ever we have to boot or execute as efi app.
+
 choice
 	prompt "malloc implementation"
 	default MALLOC_TLSF

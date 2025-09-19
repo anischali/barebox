@@ -324,6 +324,13 @@ choice
 config MALLOC_TLSF
 	bool "tlsf"
 
+config MALLOC_EFI
+	bool "efi malloc"
+	depends on EFI_PAYLOAD
+	help
+	  select this option to use a efi malloc implementation. With this
+	  This is suitable for efi payload.
+
 config MALLOC_DUMMY
 	bool "dummy malloc"
 	depends on SHELL_NONE

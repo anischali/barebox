@@ -16,6 +16,7 @@
 #include <linux/list.h>
 
 tlsf_t tlsf_mem_pool;
+static void (*malloc_request_store)(size_t bytes);
 
 struct pool_entry {
 	pool_t pool;
@@ -123,4 +124,15 @@ void *malloc_add_pool(void *mem, size_t bytes)
 	list_add(&new_pool_entry->list, &mem_pool_list);
 
 	return (void *)new_pool;
+}
+
+static void tlsf_request_store(tlsf_t tlsf, size_t bytes)
+{
+	malloc_request_store(bytes);
+}
+
+void malloc_register_store(void (*cb)(size_t bytes))
+{
+	malloc_request_store = cb;
+	tlsf_register_store(tlsf_mem_pool, tlsf_request_store);
 }

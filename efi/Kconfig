@@ -19,6 +19,10 @@ config EFI_PAYLOAD
 	select HW_HAS_PCI
 	select MALLOC_TLSF
 
+if EFI_PAYLOAD
+source "efi/payload/Kconfig"
+endif
+
 config EFI
 	bool
 

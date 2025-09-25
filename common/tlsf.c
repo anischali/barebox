@@ -606,8 +606,13 @@ static block_header_t* block_locate_free(control_t* control, size_t size)
 	block_header_t *block;
 
 	block = __block_locate_free(control, size);
-	if (!block && size && control->request_store)
-		control->request_store(tlsf_cast(tlsf_t, control), size);
+	if (block)
+		return block;
+	
+	if (!control->request_store || !size)
+		return NULL;	
+	
+	control->request_store(tlsf_cast(tlsf_t, control), size);
 
 	return __block_locate_free(control, size);
 }

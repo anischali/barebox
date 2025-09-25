@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <module.h>
 #include <tlsf.h>
+#include <linux/sizes.h>
+#include <linux/log2.h>
 
 #include <linux/kasan.h>
 #include <linux/list.h>
@@ -128,7 +130,11 @@ void *malloc_add_pool(void *mem, size_t bytes)
 
 static void tlsf_request_store(tlsf_t tlsf, size_t bytes)
 {
-	malloc_request_store(bytes);
+	size_t size;
+
+	size = __roundup_pow_of_two(bytes + tlsf_pool_overhead());
+
+	malloc_request_store(max((size_t)SZ_8M, size));
 }
 
 void malloc_register_store(void (*cb)(size_t bytes))

@@ -1,0 +1,271 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * image.c - barebox EFI payload support
+ *
+ * Copyright (c) 2014 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
+ */
+
+#include <clock.h>
+#include <common.h>
+#include <linux/sizes.h>
+#include <linux/ktime.h>
+#include <memory.h>
+#include <command.h>
+#include <magicvar.h>
+#include <init.h>
+#include <driver.h>
+#include <io.h>
+#include <efi.h>
+#include <malloc.h>
+#include <string.h>
+#include <linux/err.h>
+#include <boot.h>
+#include <bootm.h>
+#include <fs.h>
+#include <libfile.h>
+#include <binfmt.h>
+#include <wchar.h>
+#include <image-fit.h>
+#include <efi/efi-payload.h>
+#include <efi/efi-device.h>
+
+#include "image.h"
+#include "setup_header.h"
+
+static int efi_load_os(struct image_data *data,
+		       struct efi_loaded_image **loaded_image,
+		       efi_handle_t *handle)
+{
+	return efi_load_image(data->os_file, loaded_image, handle);
+}
+
+static int efi_load_ramdisk(struct image_data *data, void **initrd)
+{
+	efi_status_t efiret = EFI_SUCCESS;
+	unsigned long initrd_size;
+	void *initrd_mem;
+	int ret;
+
+	if (!data->initrd_file)
+		return 0;
+
+	pr_info("Loading ramdisk from '%s'\n", data->initrd_file);
+	initrd_mem = read_file(data->initrd_file, &initrd_size);
+	if (!initrd_mem || initrd_size <= 0) {
+		pr_err("Failed to read initrd from file: %s\n",
+		       data->initrd_file);
+		return -EINVAL;
+	}
+
+	ret = efi_initrd_register(initrd_mem, initrd_size);
+	if (ret) {
+		pr_err("Failed to register INITRD %s/n", strerror(efiret));
+		goto free_mem;
+	}
+
+	*initrd = initrd_mem;
+
+	return 0;
+
+free_mem:
+	free(initrd);
+
+	return ret;
+}
+
+static int efi_load_fdt(struct image_data *data, void **fdt)
+{
+	efi_physical_addr_t mem;
+	efi_status_t efiret = EFI_SUCCESS;
+	void *of_tree, *vmem;
+	unsigned long of_size;
+	int ret;
+
+	if (!data->oftree_file)
+		return 0;
+
+	pr_info("Loading devicetree from '%s'\n", data->oftree_file);
+	of_tree = read_file(data->oftree_file, &of_size);
+	if (!of_tree || of_size <= 0) {
+		pr_err("Failed to read initrd from file: %s\n",
+		       data->initrd_file);
+		return -EINVAL;
+	}
+
+	efiret = BS->allocate_pages(EFI_ALLOCATE_ANY_PAGES,
+				    EFI_ACPI_RECLAIM_MEMORY,
+				    DIV_ROUND_UP(SZ_2M, EFI_PAGE_SIZE), &mem);
+	if (EFI_ERROR(efiret)) {
+		ret = -efi_errno(efiret);
+		pr_err("Failed to allocate pages for FDT\n");
+		goto free_mem;
+	}
+
+	vmem = efi_phys_to_virt(mem);
+	memcpy(vmem, of_tree, of_size);
+
+	efiret = BS->install_configuration_table(&efi_fdt_guid, (void *)mem);
+	if (EFI_ERROR(efiret)) {
+		pr_err("Failed to install FDT %s/n", efi_strerror(efiret));
+		ret = -efi_errno(efiret);
+		goto free_efi_mem;
+	}
+
+	*fdt = vmem;
+	return 0;
+
+free_efi_mem:
+	BS->free_pages(mem, DIV_ROUND_UP(SZ_2M, EFI_PAGE_SIZE));
+free_mem:
+	free(of_tree);
+	return ret;
+}
+
+static void efi_unload_fdt(void *fdt)
+{
+	if (!fdt)
+		return;
+
+	BS->install_configuration_table(&efi_fdt_guid, NULL);
+	BS->free_pages(efi_virt_to_phys(fdt), SZ_2M);
+}
+
+static int do_bootm_efi_stub(struct image_data *data)
+{
+	struct efi_loaded_image *loaded_image;
+	void *fdt = NULL, *initrd = NULL;
+	efi_handle_t handle;
+	enum filetype type;
+	int ret = 0;
+
+	ret = efi_load_os(data, &loaded_image, &handle);
+	if (ret)
+		return ret;
+
+	ret = efi_load_fdt(data, &fdt);
+	if (ret)
+		goto unload_os;
+
+	ret = efi_load_ramdisk(data, &initrd);
+	if (ret)
+		goto unload_oftree;
+
+	type = file_detect_type(loaded_image->image_base, PAGE_SIZE);
+	ret = efi_execute_image(handle, loaded_image, type);
+	if (ret)
+		goto unload_ramdisk;
+
+	return 0;
+
+unload_ramdisk:
+	if (initrd)
+		efi_initrd_unregister();
+unload_oftree:
+	efi_unload_fdt(fdt);
+unload_os:
+	BS->unload_image(handle);
+
+	return ret;
+}
+
+static int efi_app_execute(struct image_data *data)
+{
+	struct efi_loaded_image *loaded_image;
+	efi_handle_t handle;
+	enum filetype type;
+	int ret;
+
+	ret = efi_load_image(data->os_file, &loaded_image, &handle);
+	if (ret)
+		return ret;
+
+	type = file_detect_type(loaded_image->image_base, PAGE_SIZE);
+
+	return efi_execute_image(handle, loaded_image, type);
+}
+
+static struct image_handler efi_app_handle_tr = {
+	.name = "EFI Application",
+	.bootm = efi_app_execute,
+	.filetype = filetype_exe,
+};
+
+static struct image_handler efi_x86_linux_handle_tr = {
+	.name = "EFI X86 Linux kernel",
+	.bootm = do_bootm_efi_stub,
+	.filetype = filetype_x86_linux_image,
+};
+
+static struct image_handler efi_arm64_handle_tr = {
+	.name = "EFI ARM64 Linux kernel",
+	.bootm = do_bootm_efi_stub,
+	.filetype = filetype_arm64_efi_linux_image,
+};
+
+static int efi_execute(struct binfmt_hook *b, char *file, int argc, char **argv)
+{
+	struct efi_loaded_image *loaded_image;
+	efi_handle_t handle;
+	int ret;
+
+	ret = efi_load_image(file, &loaded_image, &handle);
+	if (ret)
+		return ret;
+
+	return efi_execute_image(handle, loaded_image, b->type);
+}
+
+static struct binfmt_hook binfmt_efi_hook = {
+	.type = filetype_exe,
+	.hook = efi_execute,
+};
+
+static int do_bootm_mbr(struct image_data *data)
+{
+	/* On x86, Linux kernel images have a MBR magic at the end of
+	 * the first 512 byte sector and a PE magic if they're EFI-stubbed.
+	 * The PE magic has precedence over the MBR, so if we arrive in
+	 * this boot handler, the kernel has no EFI stub.
+	 *
+	 * Print a descriptive error message instead of "no image handler
+	 * found for image type MBR sector".
+	 */
+	pr_err("Can't boot MBR sector: Is CONFIG_EFI_STUB disabled in your Linux kernel config?\n");
+	return -ENOSYS;
+}
+
+static struct image_handler non_efi_handle_linux_x86 = {
+	.name = "non-EFI x86 Linux Image",
+	.bootm = do_bootm_mbr,
+	.filetype = filetype_mbr,
+};
+
+static struct binfmt_hook binfmt_arm64_efi_hook = {
+	.type = filetype_arm64_efi_linux_image,
+	.hook = efi_execute,
+};
+
+static struct binfmt_hook binfmt_x86_efi_hook = {
+	.type = filetype_x86_linux_image,
+	.hook = efi_execute,
+};
+
+static int efi_register_image_handler(void)
+{
+	register_image_handler(&efi_app_handle_tr);
+	binfmt_register(&binfmt_efi_hook);
+
+	if (IS_ENABLED(CONFIG_X86)) {
+		register_image_handler(&non_efi_handle_linux_x86);
+		register_image_handler(&efi_x86_linux_handle_tr);
+		binfmt_register(&binfmt_x86_efi_hook);
+	}
+
+	if (IS_ENABLED(CONFIG_ARM64)) {
+		register_image_handler(&efi_arm64_handle_tr);
+		binfmt_register(&binfmt_arm64_efi_hook);
+	}
+
+	return 0;
+}
+late_efi_initcall(efi_register_image_handler);

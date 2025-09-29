@@ -5,3 +5,4 @@ config EFI_HANDOVER_PROTOCOL
 config EFI_PAYLOAD_BOOTM
 	bool "EFI bootm protocol"
 	def_bool y
+	select BOOTM_FITIMAGE

@@ -11,6 +11,7 @@ obj-y	+= fs.o libfs.o
 obj-$(CONFIG_NETFS_SUPPORT)	+= netfs.o
 obj-$(CONFIG_FS_JFFS2)	+= jffs2/
 obj-$(CONFIG_FS_UBIFS)	+= ubifs/
+obj-$(CONFIG_FS_BTRFS)	+= btrfs/
 obj-$(CONFIG_FS_TFTP)	+= tftp.o
 obj-$(CONFIG_FS_OMAP4_USBBOOT)	+= omap4_usbbootfs.o
 obj-$(CONFIG_FS_NFS)	+= nfs.o

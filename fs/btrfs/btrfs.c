@@ -1,3 +1,30 @@
+/* btrfs.c - B-tree file system.  */
+/*
+ *  GRUB  --  GRand Unified Bootloader
+ *  Copyright (C) 2010,2011,2012,2013  Free Software Foundation, Inc.
+ *
+ *  GRUB is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  GRUB is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with GRUB.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
+ * Tell zstd to expose functions that aren't part of the stable API, which
+ * aren't safe to use when linking against a dynamic library. We vendor in a
+ * specific zstd version, so we know what we're getting. We need these unstable
+ * functions to provide our own allocator, which uses grub_malloc(), to zstd.
+ */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <common.h>
 #include <driver.h>
@@ -14,6 +41,7 @@
 #include <errno.h>
 #include <linux/time.h>
 #include <asm/byteorder.h>
+#include <errno.h>
 #include "btrfs.h"
 
 static phys_addr_t superblock_sectors[] = { 64 * 2, 64 * 1024 * 2,
@@ -46,8 +74,10 @@ static int read_sblock(disk_t disk, struct btrfs_superblock *sb)
 			memcpy(sb, &sblock, sizeof(sblock));
 	}
 
-	if ((err == -ERANGE || !err) && i == 0)
-		return error(ERR_BAD_FS, "not a Btrfs filesystem");
+	if ((err == -ERANGE || !err) && i == 0) {
+		return pr_err("not a Btrfs filesystem\n");
+		return -EBADR;
+	}
 
 	if (err == -ERANGE)
 		errno = err = 0;
@@ -83,16 +113,12 @@ static int check_btrfs_header(struct btrfs_data *data,
 				struct btrfs_header *header, phys_addr_t addr)
 {
 	if (le_to_cpu64(header->bytenr) != addr) {
-		dprintf("btrfs",
-			"btrfs_header.bytenr is not equal node addr\n");
-		return error(ERR_BAD_FS,
-			     "header bytenr is not equal node addr");
+		pr_err("btrfs_header.bytenr is not equal node addr\n");
+		return -EBADR;
 	}
 	if (memcmp(data->sblock.uuid, header->uuid, sizeof(btrfs_uuid_t))) {
-		dprintf("btrfs",
-			"btrfs_header.uuid doesn't match sblock uuid\n");
-		return error(ERR_BAD_FS,
-			     "header uuid doesn't match sblock uuid");
+		pr_err("btrfs_header.uuid doesn't match sblock uuid");
+		return -EBADR;
 	}
 	return 0;
 }
@@ -193,10 +219,13 @@ static int lower_bound(struct btrfs_data *data,
 
 	/* > 2 would work as well but be robust and allow a bit more just in case.
    */
-	if (recursion_depth > 10)
-		return error(ERR_BAD_FS, "too deep btrfs virtual nesting");
+	if (recursion_depth > 10) {
+		pr_err("too deep btrfs virtual nesting\n");
+		return -EBADR;
+	}
 
-	dprintf("btrfs",
+
+	pr_info(
 		"retrieving %" PRIxUINT64_T " %x %" PRIxUINT64_T "\n",
 		key_in->object_id, key_in->type, key_in->offset);
 
@@ -225,7 +254,7 @@ reiter:
 				if (err)
 					return err;
 
-				dprintf("btrfs",
+				pr_info(
 					"internal node (depth %d) %" PRIxUINT64_T
 					" %x %" PRIxUINT64_T "\n",
 					depth, node.key.object_id,
@@ -282,7 +311,7 @@ reiter:
 				if (err)
 					return err;
 
-				dprintf("btrfs",
+				pr_info(
 					"leaf (depth %d) %" PRIxUINT64_T
 					" %x %" PRIxUINT64_T "\n",
 					depth, leaf.key.object_id,
@@ -338,14 +367,14 @@ reiter:
 struct find_device_ctx {
 	struct btrfs_data *data;
 	uint64_t id;
-	device_t dev_found;
+	struct device dev_found;
 };
 
 /* Helper for find_device.  */
 static int find_device_iter(const char *name, void *data)
 {
 	struct find_device_ctx *ctx = data;
-	device_t dev;
+	struct device dev;
 	int err;
 	struct btrfs_superblock sb;
 
@@ -357,7 +386,7 @@ static int find_device_iter(const char *name, void *data)
 		return 0;
 	}
 	err = read_sblock(dev->disk, &sb);
-	if (err == ERR_BAD_FS) {
+	if (err == -EBADR) {
 		device_close(dev);
 		errno = 0;
 		return 0;
@@ -377,7 +406,7 @@ static int find_device_iter(const char *name, void *data)
 	return 1;
 }
 
-static device_t find_device(struct btrfs_data *data, uint64_t id)
+static struct device find_device(struct btrfs_data *data, uint64_t id)
 {
 	struct find_device_ctx ctx = { .data = data,
 				       .id = id,
@@ -427,7 +456,7 @@ static int btrfs_read_from_chunk(struct btrfs_data *data,
 {
 	struct btrfs_chunk_stripe *stripe;
 	phys_addr_t paddr;
-	device_t dev;
+	struct device dev;
 	int err;
 
 	stripe = (struct btrfs_chunk_stripe *)(chunk + 1);
@@ -437,7 +466,7 @@ static int btrfs_read_from_chunk(struct btrfs_data *data,
 
 	paddr = le_to_cpu64(stripe->offset) + stripe_offset;
 
-	dprintf("btrfs",
+	pr_info(
 		"stripe %" PRIxUINT64_T " maps to 0x%" PRIxUINT64_T
 		"\n"
 		"reading paddr 0x%" PRIxUINT64_T "\n",
@@ -445,10 +474,9 @@ static int btrfs_read_from_chunk(struct btrfs_data *data,
 
 	dev = find_device(data, stripe->device_id);
 	if (!dev) {
-		dprintf("btrfs", "couldn't find a necessary member device "
+		pr_info( "couldn't find a necessary member device "
 				 "of multi-device filesystem\n");
-		errno = 0;
-		return ERR_READ_ERROR;
+		return -EINVAL;
 	}
 
 	err = disk_read(dev->disk, paddr >> DISK_SECTOR_BITS,
@@ -471,12 +499,12 @@ static void rebuild_raid5(char *dest, struct raid56_buffer *buffers,
 		;
 
 	if (i == nstripes) {
-		dprintf("btrfs",
+		pr_info(
 			"called rebuild_raid5(), but all disks are OK\n");
 		return;
 	}
 
-	dprintf("btrfs", "rebuilding RAID 5 stripe #%" PRIuUINT64_T "\n",
+	pr_info( "rebuilding RAID 5 stripe #%" PRIuUINT64_T "\n",
 		i);
 
 	for (i = 0, first = 1; i < nstripes; i++) {
@@ -498,7 +526,7 @@ static int raid6_recover_read_buffer(void *data, int disk_nr,
 	struct raid56_buffer *buffers = data;
 
 	if (!buffers[disk_nr].data_is_valid)
-		return errno = ERR_READ_ERROR;
+		return -EINVAL;
 
 	memcpy(dest, buffers[disk_nr].buf, size);
 
@@ -538,7 +566,7 @@ static int raid56_read_retry(struct btrfs_data *data,
 	for (failed_devices = 0, i = 0; i < nstripes; i++) {
 		struct btrfs_chunk_stripe *stripe;
 		phys_addr_t paddr;
-		device_t dev;
+		struct device dev;
 		int err;
 
 		/*
@@ -548,14 +576,14 @@ static int raid56_read_retry(struct btrfs_data *data,
 		stripe = (struct btrfs_chunk_stripe *)(chunk + 1) + i;
 
 		paddr = le_to_cpu64(stripe->offset) + stripe_offset;
-		dprintf("btrfs",
+		pr_info(
 			"reading paddr %" PRIxUINT64_T
 			" from stripe ID %" PRIxUINT64_T "\n",
 			paddr, stripe->device_id);
 
 		dev = find_device(data, stripe->device_id);
 		if (!dev) {
-			dprintf("btrfs",
+			pr_info(
 				"stripe %" PRIuUINT64_T
 				" FAILED (dev ID %" PRIxUINT64_T ")\n",
 				i, stripe->device_id);
@@ -568,12 +596,12 @@ static int raid56_read_retry(struct btrfs_data *data,
 				buffers[i].buf);
 		if (err == 0) {
 			buffers[i].data_is_valid = 1;
-			dprintf("btrfs",
+			pr_info(
 				"stripe %" PRIuUINT64_T
 				" OK (dev ID %" PRIxUINT64_T ")\n",
 				i, stripe->device_id);
 		} else {
-			dprintf("btrfs",
+			pr_info(
 				"stripe %" PRIuUINT64_T
 				" READ FAILED (dev ID %" PRIxUINT64_T
 				")\n",
@@ -583,7 +611,7 @@ static int raid56_read_retry(struct btrfs_data *data,
 	}
 
 	if (failed_devices > 1 && (chunk_type & BTRFS_CHUNK_TYPE_RAID5)) {
-		dprintf("btrfs",
+		pr_info(
 			"not enough disks for RAID 5: total %" PRIuUINT64_T
 			", missing %" PRIuUINT64_T "\n",
 			nstripes, failed_devices);
@@ -591,14 +619,14 @@ static int raid56_read_retry(struct btrfs_data *data,
 		goto cleanup;
 	} else if (failed_devices > 2 &&
 		   (chunk_type & BTRFS_CHUNK_TYPE_RAID6)) {
-		dprintf("btrfs",
+		pr_info(
 			"not enough disks for RAID 6: total %" PRIuUINT64_T
 			", missing %" PRIuUINT64_T "\n",
 			nstripes, failed_devices);
 		ret = ERR_READ_ERROR;
 		goto cleanup;
 	} else
-		dprintf("btrfs",
+		pr_info(
 			"enough disks for RAID 5: total %" PRIuUINT64_T
 			", missing %" PRIuUINT64_T "\n",
 			nstripes, failed_devices);
@@ -635,7 +663,7 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 		size_t chsize;
 		phys_addr_t chaddr;
 
-		dprintf("btrfs", "searching for laddr %" PRIxUINT64_T "\n",
+		pr_info( "searching for laddr %" PRIxUINT64_T "\n",
 			addr);
 		for (ptr = data->sblock.bootstrap_mapping;
 		     ptr < data->sblock.bootstrap_mapping +
@@ -645,7 +673,7 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 			if (key->type != BTRFS_ITEM_TYPE_CHUNK)
 				break;
 			chunk = (struct btrfs_chunk_item *)(key + 1);
-			dprintf("btrfs",
+			pr_info(
 				"%" PRIxUINT64_T " %" PRIxUINT64_T
 				" \n",
 				le_to_cpu64(key->offset),
@@ -670,14 +698,14 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 			return err;
 		key = &key_out;
 		if (key->type != BTRFS_ITEM_TYPE_CHUNK ||
-		    !(le_to_cpu64(key->offset) <= addr))
-			return error(ERR_BAD_FS,
-				     "couldn't find the chunk descriptor");
+		    !(le_to_cpu64(key->offset) <= addr)) {
+			pr_err("couldn't find the chunk descriptor\n");
+			return -EBADR;
+		}
 
 		if (!chsize) {
-			dprintf("btrfs", "zero-size chunk\n");
-			return error(ERR_BAD_FS,
-				     "got an invalid zero-size chunk");
+			pr_err("got an invalid zero-size chunk\n");
+			return -EBADR;
 		}
 
 		/*
@@ -685,9 +713,8 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
        * contain one chunk item.
        */
 		if (chsize < sizeof(struct btrfs_chunk_item)) {
-			dprintf("btrfs", "chunk-size too small\n");
-			return error(ERR_BAD_FS,
-				     "got an invalid chunk size");
+			pr_err("got an invalid chunk size\n");
+			return -EBADR;
 		}
 		chunk = malloc(chsize);
 		if (!chunk)
@@ -717,14 +744,13 @@ chunk_found : {
 		   (BTRFS_CHUNK_TYPE_RAID5 | BTRFS_CHUNK_TYPE_RAID6));
 
 	if (le_to_cpu64(chunk->size) <= off) {
-		dprintf("btrfs", "no chunk\n");
-		return error(ERR_BAD_FS,
-			     "couldn't find the chunk descriptor");
+		pr_err("couldn't find the chunk descriptor\n");
+		return -EBADR;
 	}
 
 	nstripes = le_to_cpu16(chunk->nstripes) ?: 1;
 	chunk_stripe_length = le_to_cpu64(chunk->stripe_length) ?: 512;
-	dprintf("btrfs",
+	pr_info(
 		"chunk 0x%" PRIxUINT64_T "+0x%" PRIxUINT64_T
 		" (%d stripes (%d substripes) of %" PRIxUINT64_T ")\n",
 		le_to_cpu64(key->offset), le_to_cpu64(chunk->size), nstripes,
@@ -734,18 +760,15 @@ chunk_found : {
 		~BTRFS_CHUNK_TYPE_BITS_DONTCARE) {
 	case BTRFS_CHUNK_TYPE_SINGLE: {
 		uint64_t stripe_length;
-		dprintf("btrfs", "single\n");
+		pr_info( "single\n");
 		stripe_length =
 			divmod64(le_to_cpu64(chunk->size), nstripes, NULL);
 
 		/* For single, there should be exactly 1 stripe. */
 		if (le_to_cpu16(chunk->nstripes) != 1) {
-			dprintf("btrfs",
-				"invalid RAID_SINGLE: nstripes != 1 (%u)\n",
-				le_to_cpu16(chunk->nstripes));
-			return error(ERR_BAD_FS,
-				     "invalid RAID_SINGLE: nstripes != 1 (%u)",
+			pr_err("invalid RAID_SINGLE: nstripes != 1 (%u)",
 				     le_to_cpu16(chunk->nstripes));
+			return -EBADR;
 		}
 		if (stripe_length == 0)
 			stripe_length = 512;
@@ -761,7 +784,7 @@ chunk_found : {
 		/* fall through */
 	case BTRFS_CHUNK_TYPE_DUPLICATED:
 	case BTRFS_CHUNK_TYPE_RAID1: {
-		dprintf("btrfs", "RAID1 (copies: %d)\n", ++redundancy);
+		pr_info( "RAID1 (copies: %d)\n", ++redundancy);
 		stripen = 0;
 		stripe_offset = off;
 		csize = le_to_cpu64(chunk->size) - off;
@@ -771,18 +794,16 @@ chunk_found : {
 	      * should be exactly 2 sub-stripes.
 	      */
 		if (le_to_cpu16(chunk->nstripes) != redundancy) {
-			dprintf("btrfs", "invalid RAID1: nstripes != %u (%u)\n",
-				redundancy, le_to_cpu16(chunk->nstripes));
-			return error(ERR_BAD_FS,
-				     "invalid RAID1: nstripes != %u (%u)",
+			pr_err("invalid RAID1: nstripes != %u (%u)",
 				     redundancy, le_to_cpu16(chunk->nstripes));
+			return -EBADR;
 		}
 		break;
 	}
 	case BTRFS_CHUNK_TYPE_RAID0: {
 		uint64_t middle, high;
 		uint64_t low;
-		dprintf("btrfs", "RAID0\n");
+		pr_info( "RAID0\n");
 		middle = divmod64(off, chunk_stripe_length, &low);
 
 		high = divmod64(middle, nstripes, &stripen);
@@ -808,12 +829,9 @@ chunk_found : {
 	       * should be exactly 2 sub-stripes.
 	       */
 		if (le_to_cpu16(chunk->nsubstripes) != 2) {
-			dprintf("btrfs",
-				"invalid RAID10: nsubstripes != 2 (%u)",
-				le_to_cpu16(chunk->nsubstripes));
-			return error(ERR_BAD_FS,
-				     "invalid RAID10: nsubstripes != 2 (%u)",
+			pr_err("invalid RAID10: nsubstripes != 2 (%u)",
 				     le_to_cpu16(chunk->nsubstripes));
+			return -EBADR;
 		}
 
 		break;
@@ -825,10 +843,10 @@ chunk_found : {
 		redundancy = 1; /* no redundancy for now */
 
 		if (le_to_cpu64(chunk->type) & BTRFS_CHUNK_TYPE_RAID5) {
-			dprintf("btrfs", "RAID5\n");
+			pr_info( "RAID5\n");
 			nparities = 1;
 		} else {
-			dprintf("btrfs", "RAID6\n");
+			pr_info( "RAID6\n");
 			nparities = 2;
 		}
 
@@ -870,9 +888,10 @@ chunk_found : {
 	       * stripen is computed without the parities
 	       * (0 for A0, A1, A2, 1 for B0, B1, B2, etc.).
 	       */
-		if (nparities >= nstripes)
-			return error(ERR_BAD_FS,
-				     "invalid RAID5/6: nparities >= nstripes");
+		if (nparities >= nstripes) {
+			pr_err("invalid RAID5/6: nparities >= nstripes\n");
+			return -EBADR;
+		}
 		high = divmod64(stripe_nr, nstripes - nparities, &stripen);
 
 		/*
@@ -898,14 +917,13 @@ chunk_found : {
 		break;
 	}
 	default:
-		dprintf("btrfs", "unsupported RAID\n");
-		return error(ERR_NOT_IMPLEMENTED_YET,
-			     "unsupported RAID flags %" PRIxUINT64_T,
-			     le_to_cpu64(chunk->type));
+		pr_info("unsupported RAID flags %08x", le_to_cpu64(chunk->type));
+		return -EOPNOTSUPP;
 	}
-	if (csize == 0)
-		return error(ERR_BUG,
-			     "couldn't find the chunk descriptor");
+	if (csize == 0) {
+		pr_err("couldn't find the chunk descriptor\n");
+		return -EINVAL;
+	}
 	if (csize > (uint64_t)size)
 		csize = size;
 
@@ -920,7 +938,7 @@ chunk_found : {
 	for (j = 0; j < 2; j++) {
 		size_t est_chunk_alloc = 0;
 
-		dprintf("btrfs",
+		pr_info(
 			"chunk 0x%" PRIxUINT64_T "+0x%" PRIxUINT64_T
 			" (%d stripes (%d substripes) of %" PRIxUINT64_T
 			")\n",
@@ -928,7 +946,7 @@ chunk_found : {
 			le_to_cpu16(chunk->nstripes),
 			le_to_cpu16(chunk->nsubstripes),
 			le_to_cpu64(chunk->stripe_length));
-		dprintf("btrfs", "reading laddr 0x%" PRIxUINT64_T "\n",
+		pr_info( "reading laddr 0x%" PRIxUINT64_T "\n",
 			addr);
 
 		if (mul(sizeof(struct btrfs_chunk_stripe),
@@ -936,12 +954,12 @@ chunk_found : {
 		    add(est_chunk_alloc, sizeof(struct btrfs_chunk_item),
 			&est_chunk_alloc) ||
 		    est_chunk_alloc > chunk->size) {
-			err = ERR_BAD_FS;
+			err = -EBADR;
 			break;
 		}
 
 		if (le_to_cpu16(chunk->nstripes) > avail_stripes) {
-			err = ERR_BAD_FS;
+			err = -EBADR;
 			break;
 		}
 
@@ -982,13 +1000,14 @@ chunk_found : {
 	return 0;
 }
 
-static struct btrfs_data *btrfs_mount(device_t dev)
+static struct btrfs_data *btrfs_mount(struct device dev)
 {
 	struct btrfs_data *data;
 	int err;
 
 	if (!dev->disk) {
-		error(ERR_BAD_FS, "not BtrFS");
+		pr_err("not BtrFS\n");
+		errno = -EBADR;
 		return NULL;
 	}
 
@@ -1046,8 +1065,10 @@ static int btrfs_read_inode(struct btrfs_data *data,
 	if (err)
 		return err;
 	if (num != key_out.object_id ||
-	    key_out.type != BTRFS_ITEM_TYPE_INODE_ITEM)
-		return error(ERR_BAD_FS, "inode not found");
+	    key_out.type != BTRFS_ITEM_TYPE_INODE_ITEM) {
+			pr_err("inode not found\n");
+			return -EBADR;
+		}
 
 	return btrfs_read_logical(data, elemaddr, inode, sizeof(*inode), 0);
 }
@@ -1090,8 +1111,8 @@ static ssize_t btrfs_zstd_decompress(char *ibuf, size_t isize, off_t off,
 	if (otmpsize < ZSTD_BTRFS_MAX_INPUT) {
 		allocated = malloc(ZSTD_BTRFS_MAX_INPUT);
 		if (!allocated) {
-			error(ERR_OUT_OF_MEMORY,
-			      "failed allocate a zstd buffer");
+			ret = -ENOMEM;
+			pr_err("failed allocate a zstd buffer\n");
 			goto err;
 		}
 		otmpbuf = (char *)allocated;
@@ -1102,8 +1123,8 @@ static ssize_t btrfs_zstd_decompress(char *ibuf, size_t isize, off_t off,
 	dctx = ZSTD_createDCtx_advanced(zstd_allocator());
 	if (!dctx) {
 		/* ZSTD_createDCtx_advanced() only fails if it is out of memory. */
-		error(ERR_OUT_OF_MEMORY,
-		      "failed to create a zstd context");
+		pr_err("failed to create a zstd context\n");
+		ret = -ENOMEM;
 		goto err;
 	}
 
@@ -1113,14 +1134,15 @@ static ssize_t btrfs_zstd_decompress(char *ibuf, size_t isize, off_t off,
    */
 	isize = ZSTD_findFrameCompressedSize(ibuf, isize);
 	if (ZSTD_isError(isize)) {
-		error(ERR_BAD_COMPRESSED_DATA, "zstd data corrupted");
+		ret = -EINVAL;
+		pr_err("zstd failed to get size, data corrupted\n");
 		goto err;
 	}
 
 	/* Decompress and check for errors. */
 	zstd_ret = ZSTD_decompressDCtx(dctx, otmpbuf, otmpsize, ibuf, isize);
 	if (ZSTD_isError(zstd_ret)) {
-		error(ERR_BAD_COMPRESSED_DATA, "zstd data corrupted");
+		pr_err("zstd failed to decompress, data corrupted\n");
 		goto err;
 	}
 
@@ -1258,14 +1280,13 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 			}
 			if (key_out.object_id != ino ||
 			    key_out.type != BTRFS_ITEM_TYPE_EXTENT_ITEM) {
-				error(ERR_BAD_FS, "extent not found");
-				return -1;
+				pr_err("extent not found");
+				return -EBADR;
 			}
 			if ((ssize_t)elemsize < ((char *)&data->extent->inl -
 						 (char *)data->extent)) {
-				error(ERR_BAD_FS,
-				      "extent descriptor is too short");
-				return -1;
+				pr_err("extent descriptor is too short");
+				return -EBADR;
 			}
 			data->extstart = le_to_cpu64(key_out.offset);
 			data->extsize = elemsize;
@@ -1290,7 +1311,7 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 					data->extstart +
 					le_to_cpu64(data->extent->filled);
 
-			dprintf("btrfs",
+			pr_info(
 				"regular extent 0x%" PRIxUINT64_T
 				"+0x%" PRIxUINT64_T "\n",
 				le_to_cpu64(key_out.offset),
@@ -1338,25 +1359,22 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 			csize = len;
 
 		if (data->extent->encryption) {
-			error(ERR_NOT_IMPLEMENTED_YET,
-			      "encryption not supported");
-			return -1;
+			pr_err("encryption not supported");
+			return -EOPNOTSUPP;
 		}
 
 		if (data->extent->compression != BTRFS_COMPRESSION_NONE &&
 		    data->extent->compression != BTRFS_COMPRESSION_ZLIB &&
 		    data->extent->compression != BTRFS_COMPRESSION_LZO &&
 		    data->extent->compression != BTRFS_COMPRESSION_ZSTD) {
-			error(ERR_NOT_IMPLEMENTED_YET,
-			      "compression type 0x%x not supported",
+			pr_err("compression type 0x%x not supported",
 			      data->extent->compression);
-			return -1;
+			return -EOPNOTSUPP;
 		}
 
 		if (data->extent->encoding) {
-			error(ERR_NOT_IMPLEMENTED_YET,
-			      "encoding not supported");
-			return -1;
+			pr_err("encoding not supported");
+			return -EOPNOTSUPP;
 		}
 
 		switch (data->extent->type) {
@@ -1371,10 +1389,10 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 						     (uint8_t *)data->extent),
 					    extoff, buf,
 					    csize) != (ssize_t)csize) {
-					if (!errno)
-						error(ERR_BAD_COMPRESSED_DATA,
-						      "premature end of compressed");
-					return -1;
+					if (!errno) {
+						pr_err("premature end of compressed");
+						return -EINVAL;
+					}
 				}
 			} else if (data->extent->compression ==
 				   BTRFS_COMPRESSION_LZO) {
@@ -1459,10 +1477,10 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 				free(tmp);
 
 				if (ret != (ssize_t)csize) {
-					if (!errno)
-						error(ERR_BAD_COMPRESSED_DATA,
-						      "premature end of compressed");
-					return -1;
+					if (!errno) {
+						pr_err("premature end of compressed");
+						return -EINVAL;
+					}
 				}
 
 				break;
@@ -1477,10 +1495,9 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 				return -1;
 			break;
 		default:
-			error(ERR_NOT_IMPLEMENTED_YET,
-			      "unsupported extent type 0x%x",
+			pr_err("unsupported extent type 0x%x",
 			      data->extent->type);
-			return -1;
+			return -EOPNOTSUPP;
 		}
 		buf += csize;
 		pos += csize;
@@ -1507,8 +1524,10 @@ static int get_root(struct btrfs_data *data, struct btrfs_key *key,
 	if (err)
 		return err;
 	if (key_in.object_id != key_out.object_id ||
-	    key_in.type != key_out.type || key_in.offset != key_out.offset)
-		return error(ERR_BAD_FS, "no root");
+	    key_in.type != key_out.type || key_in.offset != key_out.offset) {
+			pr_err("no root");
+			return -EBADR;
+		}
 	err = btrfs_read_logical(data, elemaddr, &ri, sizeof(ri), 0);
 	if (err)
 		return err;
@@ -1559,8 +1578,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 		if (*type != BTRFS_DIR_ITEM_TYPE_DIRECTORY) {
 			free(path_alloc);
 			free(origpath);
-			return error(ERR_BAD_FILE_TYPE,
-				     N_("not a directory"));
+			pr_err("not a directory");
+			return -EBADR;
 		}
 
 		if (ctokenlen == 1 && ctoken[0] == '.') {
@@ -1584,9 +1603,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 			    key->object_id != key_out.object_id) {
 				free(direl);
 				free(path_alloc);
-				err = error(ERR_FILE_NOT_FOUND,
-					    N_("file `%s' not found"),
-					    origpath);
+				pr_err("file '%s' not found\n", origpath);
+				err = -ENOENT;
 				free(origpath);
 				return err;
 			}
@@ -1613,8 +1631,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 		if (key_cmp(key, &key_out) != 0) {
 			free(direl);
 			free(path_alloc);
-			err = error(ERR_FILE_NOT_FOUND,
-				    N_("file `%s' not found"), origpath);
+			err = -ENOENT;
+			pr_err("file `%s' not found\n", origpath);
 			free(origpath);
 			return err;
 		}
@@ -1625,9 +1643,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 			    add(allocated, 1, &sz)) {
 				free(path_alloc);
 				free(origpath);
-				return error(
-					-ERANGE,
-					N_("directory item size overflow"));
+				pr_err("directory item size overflow\n");
+				return -ERANGE;
 			}
 			free(direl);
 			direl = malloc(sz);
@@ -1658,8 +1675,9 @@ static int find_path(struct btrfs_data *data, const char *path,
 		if ((uint8_t *)cdirel - (uint8_t *)direl >= (ssize_t)elemsize) {
 			free(direl);
 			free(path_alloc);
-			err = error(ERR_FILE_NOT_FOUND,
-				    N_("file `%s' not found"), origpath);
+			pr_err("file `%s' not found\n", origpath);
+
+			err = -ENOENT;
 			free(origpath);
 			return err;
 		}
@@ -1672,9 +1690,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 				free(direl);
 				free(path_alloc);
 				free(origpath);
-				return error(
-					ERR_SYMLINK_LOOP,
-					N_("too deep nesting of symlinks"));
+				pr_err("too deep nesting of symlinks\n");
+				return -ELOOP;
 			}
 
 			err = btrfs_read_inode(data, &inode,
@@ -1691,8 +1708,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 				free(direl);
 				free(path_alloc);
 				free(origpath);
-				return error(-ERANGE,
-					     N_("buffer size overflow"));
+				pr_err("buffer size overflow\n");
+				return -ERANGE;
 			}
 			tmp = malloc(sz);
 			if (!tmp) {
@@ -1745,9 +1762,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 			    cdirel->key.type != key_out.type) {
 				free(direl);
 				free(path_alloc);
-				err = error(ERR_FILE_NOT_FOUND,
-					    N_("file `%s' not found"),
-					    origpath);
+				pr_err("file `%s' not found\n", origpath);
+				err = -ENOENT;
 				free(origpath);
 				return err;
 			}
@@ -1771,9 +1787,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 			    *type == BTRFS_DIR_ITEM_TYPE_REGULAR) {
 				free(direl);
 				free(path_alloc);
-				err = error(ERR_FILE_NOT_FOUND,
-					    N_("file `%s' not found"),
-					    origpath);
+				pr_err("file `%s' not found\n", origpath);
+				err = -ENOENT;
 				free(origpath);
 				return err;
 			}
@@ -1785,9 +1800,7 @@ static int find_path(struct btrfs_data *data, const char *path,
 			free(path_alloc);
 			free(origpath);
 			free(direl);
-			return error(ERR_BAD_FS,
-				     "unrecognised object type 0x%x",
-				     cdirel->key.type);
+			return -EBADR;
 		}
 	}
 
@@ -1797,7 +1810,7 @@ static int find_path(struct btrfs_data *data, const char *path,
 	return 0;
 }
 
-static int btrfs_dir(device_t device, const char *path, fs_dir_hook_t hook,
+static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 		       void *hook_data)
 {
 	struct btrfs_data *data = btrfs_mount(device);
@@ -1824,7 +1837,8 @@ static int btrfs_dir(device_t device, const char *path, fs_dir_hook_t hook,
 	}
 	if (type != BTRFS_DIR_ITEM_TYPE_DIRECTORY) {
 		btrfs_unmount(data);
-		return error(ERR_BAD_FILE_TYPE, N_("not a directory"));
+		pr_err("Not a directory\n");
+		return -EBADR;
 	}
 
 	err = lower_bound(data, &key_in, &key_out, tree, &elemaddr, &elemsize,
@@ -1850,9 +1864,8 @@ static int btrfs_dir(device_t device, const char *path, fs_dir_hook_t hook,
 		if (elemsize > allocated) {
 			if (mul(2, elemsize, &allocated) ||
 			    add(allocated, 1, &sz)) {
-				error(-ERANGE,
-				      N_("directory element size overflow"));
-				r = -errno;
+				pr_err("directory element size overflow\n");
+				r = -ERANGE;
 				break;
 			}
 			free(direl);
@@ -1947,7 +1960,7 @@ static int btrfs_open(struct file *file, const char *name)
 	}
 	if (type != BTRFS_DIR_ITEM_TYPE_REGULAR) {
 		btrfs_unmount(data);
-		return error(ERR_BAD_FILE_TYPE, N_("not a regular file"));
+		return -ENOENT;
 	}
 
 	data->inode = key_in.object_id;
@@ -1963,14 +1976,14 @@ static int btrfs_open(struct file *file, const char *name)
 	return err;
 }
 
-static int btrfs_close(file_t file)
+static int btrfs_close(struct file file)
 {
 	btrfs_unmount(file->data);
 
 	return 0;
 }
 
-static ssize_t btrfs_read(file_t file, char *buf, size_t len)
+static ssize_t btrfs_read(struct file *file, char *buf, size_t len)
 {
 	struct btrfs_data *data = file->data;
 
@@ -1978,7 +1991,7 @@ static ssize_t btrfs_read(file_t file, char *buf, size_t len)
 				 buf, len);
 }
 
-static int btrfs_uuid(device_t device, char **uuid)
+static int btrfs_uuid(struct device device, char **uuid)
 {
 	struct btrfs_data *data;
 
@@ -2003,7 +2016,7 @@ static int btrfs_uuid(device_t device, char **uuid)
 	return errno;
 }
 
-static int btrfs_label(device_t device, char **label)
+static int btrfs_label(struct device device, char **label)
 {
 	struct btrfs_data *data;
 
@@ -2051,7 +2064,7 @@ static const struct {
 			 { 0, 0 } /* Array terminator. */
 		 } };
 
-static int btrfs_embed(device_t device __attribute__((unused)),
+static int btrfs_embed(struct device device __attribute__((unused)),
 			 unsigned int *nsectors, unsigned int max_nsectors,
 			 embed_type_t embed_type, phys_addr_t **sectors)
 {
@@ -2059,8 +2072,10 @@ static int btrfs_embed(device_t device __attribute__((unused)),
 	const struct embed_region *u;
 	phys_addr_t *map;
 
-	if (embed_type != EMBED_PCBIOS)
-		return pr_err("BtrFS currently supports only PC-BIOS embedding");
+	if (embed_type != EMBED_PCBIOS) {
+		pr_err("BtrFS currently supports only PC-BIOS embedding\n");
+		return -EINVAL;
+	}
 
 	map = calloc(btrfs_head.available.secs, sizeof(*map));
 	if (map == NULL)
@@ -2088,9 +2103,8 @@ static int btrfs_embed(device_t device __attribute__((unused)),
 
 	if (n < *nsectors) {
 		free(map);
-		return error(-ERANGE,
-			     N_("your core.img is unusually large.  "
-				"It won't fit in the embedding area"));
+		pr_err("your core.img is unusually large. It won't fit in the embedding area\n");
+		return -ERANGE;
 	}
 
 	if (n > max_nsectors)
@@ -2112,18 +2126,3 @@ static int btrfs_embed(device_t device __attribute__((unused)),
 	return 0;
 }
 #endif
-
-static struct fs btrfs_fs = {
-	.name = "btrfs",
-	.fs_dir = btrfs_dir,
-	.fs_open = btrfs_open,
-	.fs_read = btrfs_read,
-	.fs_close = btrfs_close,
-	.fs_uuid = btrfs_uuid,
-	.fs_label = btrfs_label,
-#ifdef UTIL
-	.fs_embed = btrfs_embed,
-	.reserved_first_sector = 1,
-	.blocklist_install = 0,
-#endif
-};

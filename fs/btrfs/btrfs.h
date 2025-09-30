@@ -178,4 +178,54 @@ struct btrfs_extent_data {
 
 #define BTRFS_OBJECT_ID_CHUNK 0x100
 
+
+enum
+  {
+    BTRFS_ITEM_TYPE_INODE_ITEM = 0x01,
+    BTRFS_ITEM_TYPE_INODE_REF = 0x0c,
+    BTRFS_ITEM_TYPE_DIR_ITEM = 0x54,
+    BTRFS_ITEM_TYPE_EXTENT_ITEM = 0x6c,
+    BTRFS_ITEM_TYPE_ROOT_ITEM = 0x84,
+    BTRFS_ITEM_TYPE_ROOT_BACKREF = 0x90,
+    BTRFS_ITEM_TYPE_DEVICE = 0xd8,
+    BTRFS_ITEM_TYPE_CHUNK = 0xe4
+  };
+
+enum
+  {
+    BTRFS_ROOT_VOL_OBJECTID = 5,
+    BTRFS_TREE_ROOT_OBJECTID = 0x100,
+  };
+
+struct btrfs_root_item
+{
+  uint8_t dummy[0xb0];
+  uint64_t tree;
+  uint64_t inode;
+};
+
+struct btrfs_key
+{
+  uint64_t object_id;
+  uint8_t type;
+  uint64_t offset;
+} PACKED;
+
+
+struct btrfs_root_backref
+{
+  uint64_t inode_id;
+  uint64_t seqnr;
+  uint16_t n;
+  char name[0];
+};
+
+struct btrfs_inode_ref
+{
+  uint64_t idxid;
+  uint16_t n;
+  char name[0];
+};
+
+
 #endif

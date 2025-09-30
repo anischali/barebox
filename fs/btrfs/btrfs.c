@@ -31,6 +31,11 @@
 #include <init.h>
 #include <malloc.h>
 #include <fs.h>
+#include <crc.h>
+#include <libbb.h>
+#include <libgen.h>
+#include <environment.h>
+#include <libfile.h>
 #include <command.h>
 #include <linux/stat.h>
 #include <linux/ctype.h>
@@ -548,7 +553,7 @@ static int raid56_read_retry(struct btrfs_data *data,
 			       uint64_t csize, void *buf, uint64_t parities_pos)
 {
 	struct raid56_buffer *buffers;
-	uint64_t nstripes = le_to_cpu16(chunk->nstripes);
+	uint64_t nstripes = le16_to_cpu(chunk->nstripes);
 	uint64_t chunk_type = le_to_cpu64(chunk->type);
 	int ret = ERR_OUT_OF_MEMORY;
 	uint64_t i, failed_devices;
@@ -673,18 +678,13 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 			if (key->type != BTRFS_ITEM_TYPE_CHUNK)
 				break;
 			chunk = (struct btrfs_chunk_item *)(key + 1);
-			pr_info(
-				"%" PRIxUINT64_T " %" PRIxUINT64_T
-				" \n",
-				le_to_cpu64(key->offset),
-				le_to_cpu64(chunk->size));
 			if (le_to_cpu64(key->offset) <= addr &&
 			    addr < le_to_cpu64(key->offset) +
 					    le_to_cpu64(chunk->size))
 				goto chunk_found;
 			ptr += sizeof(*key) + sizeof(*chunk) +
 			       sizeof(struct btrfs_chunk_stripe) *
-				       le_to_cpu16(chunk->nstripes);
+				       le16_to_cpu(chunk->nstripes);
 		}
 
 		key_in.object_id =
@@ -748,13 +748,13 @@ chunk_found : {
 		return -EBADR;
 	}
 
-	nstripes = le_to_cpu16(chunk->nstripes) ?: 1;
+	nstripes = le16_to_cpu(chunk->nstripes) ?: 1;
 	chunk_stripe_length = le_to_cpu64(chunk->stripe_length) ?: 512;
 	pr_info(
 		"chunk 0x%" PRIxUINT64_T "+0x%" PRIxUINT64_T
 		" (%d stripes (%d substripes) of %" PRIxUINT64_T ")\n",
 		le_to_cpu64(key->offset), le_to_cpu64(chunk->size), nstripes,
-		le_to_cpu16(chunk->nsubstripes), chunk_stripe_length);
+		le16_to_cpu(chunk->nsubstripes), chunk_stripe_length);
 
 	switch (le_to_cpu64(chunk->type) &
 		~BTRFS_CHUNK_TYPE_BITS_DONTCARE) {
@@ -765,9 +765,9 @@ chunk_found : {
 			divmod64(le_to_cpu64(chunk->size), nstripes, NULL);
 
 		/* For single, there should be exactly 1 stripe. */
-		if (le_to_cpu16(chunk->nstripes) != 1) {
+		if (le16_to_cpu(chunk->nstripes) != 1) {
 			pr_err("invalid RAID_SINGLE: nstripes != 1 (%u)",
-				     le_to_cpu16(chunk->nstripes));
+				     le16_to_cpu(chunk->nstripes));
 			return -EBADR;
 		}
 		if (stripe_length == 0)
@@ -793,9 +793,9 @@ chunk_found : {
 	      * Redundancy, and substripes only apply to RAID10, and there
 	      * should be exactly 2 sub-stripes.
 	      */
-		if (le_to_cpu16(chunk->nstripes) != redundancy) {
+		if (le16_to_cpu(chunk->nstripes) != redundancy) {
 			pr_err("invalid RAID1: nstripes != %u (%u)",
-				     redundancy, le_to_cpu16(chunk->nstripes));
+				     redundancy, le16_to_cpu(chunk->nstripes));
 			return -EBADR;
 		}
 		break;
@@ -815,7 +815,7 @@ chunk_found : {
 		uint64_t middle, high;
 		uint64_t low;
 		uint16_t nsubstripes;
-		nsubstripes = le_to_cpu16(chunk->nsubstripes) ?: 1;
+		nsubstripes = le16_to_cpu(chunk->nsubstripes) ?: 1;
 		middle = divmod64(off, chunk_stripe_length, &low);
 
 		high = divmod64(middle, nstripes / nsubstripes ?: 1, &stripen);
@@ -828,9 +828,9 @@ chunk_found : {
 	       * Substripes only apply to RAID10, and there
 	       * should be exactly 2 sub-stripes.
 	       */
-		if (le_to_cpu16(chunk->nsubstripes) != 2) {
+		if (le16_to_cpu(chunk->nsubstripes) != 2) {
 			pr_err("invalid RAID10: nsubstripes != 2 (%u)",
-				     le_to_cpu16(chunk->nsubstripes));
+				     le16_to_cpu(chunk->nsubstripes));
 			return -EBADR;
 		}
 
@@ -943,14 +943,14 @@ chunk_found : {
 			" (%d stripes (%d substripes) of %" PRIxUINT64_T
 			")\n",
 			le_to_cpu64(key->offset), le_to_cpu64(chunk->size),
-			le_to_cpu16(chunk->nstripes),
-			le_to_cpu16(chunk->nsubstripes),
+			le16_to_cpu(chunk->nstripes),
+			le16_to_cpu(chunk->nsubstripes),
 			le_to_cpu64(chunk->stripe_length));
 		pr_info( "reading laddr 0x%" PRIxUINT64_T "\n",
 			addr);
 
 		if (mul(sizeof(struct btrfs_chunk_stripe),
-			le_to_cpu16(chunk->nstripes), &est_chunk_alloc) ||
+			le16_to_cpu(chunk->nstripes), &est_chunk_alloc) ||
 		    add(est_chunk_alloc, sizeof(struct btrfs_chunk_item),
 			&est_chunk_alloc) ||
 		    est_chunk_alloc > chunk->size) {
@@ -958,7 +958,7 @@ chunk_found : {
 			break;
 		}
 
-		if (le_to_cpu16(chunk->nstripes) > avail_stripes) {
+		if (le16_to_cpu(chunk->nstripes) > avail_stripes) {
 			err = -EBADR;
 			break;
 		}
@@ -1236,7 +1236,7 @@ static ssize_t btrfs_lzo_decompress(char *ibuf, size_t isize, off_t off,
 		}
 
 		/* Decompress whole block directly to output buffer.  */
-		if (lzo1x_decompress_safe((lzo_bytep)ibuf, cblock_size,
+		if (lzo1x_decompress_safe((lzo_bytep)ibuf, cblock_s,                                                                                                                                                                                  ize,
 					  (lzo_bytep)obuf, &usize,
 					  NULL) != LZO_E_OK)
 			return -1;
@@ -1312,8 +1312,7 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 					le_to_cpu64(data->extent->filled);
 
 			pr_info(
-				"regular extent 0x%" PRIxUINT64_T
-				"+0x%" PRIxUINT64_T "\n",
+				"regular extent 0x%08x + 0x%08x\n",
 				le_to_cpu64(key_out.offset),
 				le_to_cpu64(data->extent->size));
 			/*
@@ -1618,7 +1617,7 @@ static int find_path(struct btrfs_data *data, const char *path,
 		}
 
 		key->type = BTRFS_ITEM_TYPE_DIR_ITEM;
-		key->offset = cpu_to_le64(~getcrc32c(1, ctoken, ctokenlen));
+		key->offset = cpu_to_le64(~crc32(1, ctoken, ctokenlen));
 
 		err = lower_bound(data, key, &key_out, *tree, &elemaddr,
 				  &elemsize, NULL, 0);
@@ -1666,9 +1665,9 @@ static int find_path(struct btrfs_data *data, const char *path,
 		for (cdirel = direl;
 		     (uint8_t *)cdirel - (uint8_t *)direl < (ssize_t)elemsize;
 		     cdirel = (void *)((uint8_t *)(direl + 1) +
-				       le_to_cpu16(cdirel->n) +
-				       le_to_cpu16(cdirel->m))) {
-			if (ctokenlen == le_to_cpu16(cdirel->n) &&
+				       le16_to_cpu(cdirel->n) +
+				       le16_to_cpu(cdirel->m))) {
+			if (ctokenlen == le16_to_cpu(cdirel->n) &&
 			    memcmp(cdirel->name, ctoken, ctokenlen) == 0)
 				break;
 		}
@@ -1883,7 +1882,7 @@ static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 		}
 
 		if (direl == NULL ||
-		    add(le_to_cpu16(direl->n), le_to_cpu16(direl->m),
+		    add(le16_to_cpu(direl->n), le16_to_cpu(direl->m),
 			&est_size) ||
 		    add(est_size, sizeof(*direl), &est_size) ||
 		    sub(est_size, sizeof(direl->name), &est_size) ||
@@ -1896,14 +1895,14 @@ static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 		for (cdirel = direl;
 		     (uint8_t *)cdirel - (uint8_t *)direl < (ssize_t)elemsize;
 		     cdirel = (void *)((uint8_t *)(direl + 1) +
-				       le_to_cpu16(cdirel->n) +
-				       le_to_cpu16(cdirel->m))) {
+				       le16_to_cpu(cdirel->n) +
+				       le16_to_cpu(cdirel->m))) {
 			char c;
 			struct btrfs_inode inode;
 			struct dirhook_info info;
 
 			if (cdirel == NULL ||
-			    add(le_to_cpu16(cdirel->n), le_to_cpu16(cdirel->m),
+			    add(le16_to_cpu(cdirel->n), le16_to_cpu(cdirel->m),
 				&est_size) ||
 			    add(est_size, sizeof(*cdirel), &est_size) ||
 			    sub(est_size, sizeof(cdirel->name), &est_size) ||
@@ -1922,13 +1921,13 @@ static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 				info.mtime = le_to_cpu64(inode.mtime.sec);
 				info.mtimeset = 1;
 			}
-			c = cdirel->name[le_to_cpu16(cdirel->n)];
-			cdirel->name[le_to_cpu16(cdirel->n)] = 0;
+			c = cdirel->name[le16_to_cpu(cdirel->n)];
+			cdirel->name[le16_to_cpu(cdirel->n)] = 0;
 			info.dir = (cdirel->type ==
 				    BTRFS_DIR_ITEM_TYPE_DIRECTORY);
 			if (hook(cdirel->name, &info, hook_data))
 				goto out;
-			cdirel->name[le_to_cpu16(cdirel->n)] = c;
+			cdirel->name[le16_to_cpu(cdirel->n)] = c;
 		}
 		r = next(data, &desc, &elemaddr, &elemsize, &key_out);
 	} while (r > 0);
@@ -2002,14 +2001,14 @@ static int btrfs_uuid(struct device device, char **uuid)
 		return errno;
 
 	*uuid = xasprintf("%04x%04x-%04x-%04x-%04x-%04x%04x%04x",
-			  be_to_cpu16(data->sblock.uuid[0]),
-			  be_to_cpu16(data->sblock.uuid[1]),
-			  be_to_cpu16(data->sblock.uuid[2]),
-			  be_to_cpu16(data->sblock.uuid[3]),
-			  be_to_cpu16(data->sblock.uuid[4]),
-			  be_to_cpu16(data->sblock.uuid[5]),
-			  be_to_cpu16(data->sblock.uuid[6]),
-			  be_to_cpu16(data->sblock.uuid[7]));
+			  be16_to_cpu(data->sblock.uuid[0]),
+			  be16_to_cpu(data->sblock.uuid[1]),
+			  be16_to_cpu(data->sblock.uuid[2]),
+			  be16_to_cpu(data->sblock.uuid[3]),
+			  be16_to_cpu(data->sblock.uuid[4]),
+			  be16_to_cpu(data->sblock.uuid[5]),
+			  be16_to_cpu(data->sblock.uuid[6]),
+			  be16_to_cpu(data->sblock.uuid[7]));
 
 	btrfs_unmount(data);
 

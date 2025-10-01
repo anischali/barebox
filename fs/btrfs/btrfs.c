@@ -49,6 +49,25 @@
 #include <errno.h>
 #include "btrfs.h"
 
+struct ext_filesystem {
+	/* Inode size of partition */
+	uint32_t inodesz;
+	/* Group Descriptor size */
+	uint16_t gdsize;
+
+	/* Block Device Descriptor */
+	struct cdev *cdev;
+
+	struct ext2_data *data;
+
+	struct device *dev;
+};
+
+struct disk {
+	struct cdev *cdev;
+	struct btrfs_data *data;
+};
+
 static phys_addr_t superblock_sectors[] = { 64 * 2, 64 * 1024 * 2,
 					    256 * 1048576 * 2,
 					    1048576ULL * 1048576ULL * 2 };
@@ -56,26 +75,25 @@ static phys_addr_t superblock_sectors[] = { 64 * 2, 64 * 1024 * 2,
 static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 				void *buf, size_t size, int recursion_depth);
 
-static int read_sblock(disk_t disk, struct btrfs_superblock *sb)
+static int read_sblock(struct disk disk, struct btrfs_superblock *sb)
 {
 	struct btrfs_superblock sblock;
 	unsigned i;
 	int err = 0;
 	for (i = 0; i < ARRAY_SIZE(superblock_sectors); i++) {
 		/* Don't try additional superblocks beyond device size.  */
-		if (i && (le_to_cpu64(sblock.this_device.size) >>
+		if (i && (le64_to_cpu(sblock.this_device.size) >>
 			  DISK_SECTOR_BITS) <= superblock_sectors[i])
 			break;
-		err = disk_read(disk, superblock_sectors[i], 0, sizeof(sblock),
-				&sblock);
+		err = cdev_read(disk->cdev, &sblock, sizeof(sblock), superblock_sectors[i], 0);
 		if (err == -ERANGE)
 			break;
 
 		if (memcmp((char *)sblock.signature, BTRFS_SIGNATURE,
 			   sizeof(BTRFS_SIGNATURE) - 1) != 0)
 			break;
-		if (i == 0 || le_to_cpu64(sblock.generation) >
-				      le_to_cpu64(sb->generation))
+		if (i == 0 || le64_to_cpu(sblock.generation) >
+				      le64_to_cpu(sb->generation))
 			memcpy(sb, &sblock, sizeof(sblock));
 	}
 
@@ -92,9 +110,9 @@ static int read_sblock(disk_t disk, struct btrfs_superblock *sb)
 
 static int key_cmp(const struct btrfs_key *a, const struct btrfs_key *b)
 {
-	if (le_to_cpu64(a->object_id) < le_to_cpu64(b->object_id))
+	if (le64_to_cpu(a->object_id) < le64_to_cpu(b->object_id))
 		return -1;
-	if (le_to_cpu64(a->object_id) > le_to_cpu64(b->object_id))
+	if (le64_to_cpu(a->object_id) > le64_to_cpu(b->object_id))
 		return +1;
 
 	if (a->type < b->type)
@@ -102,9 +120,9 @@ static int key_cmp(const struct btrfs_key *a, const struct btrfs_key *b)
 	if (a->type > b->type)
 		return +1;
 
-	if (le_to_cpu64(a->offset) < le_to_cpu64(b->offset))
+	if (le64_to_cpu(a->offset) < le64_to_cpu(b->offset))
 		return -1;
-	if (le_to_cpu64(a->offset) > le_to_cpu64(b->offset))
+	if (le64_to_cpu(a->offset) > le64_to_cpu(b->offset))
 		return +1;
 	return 0;
 }
@@ -117,7 +135,7 @@ static void free_iterator(struct btrfs_leaf_descriptor *desc)
 static int check_btrfs_header(struct btrfs_data *data,
 				struct btrfs_header *header, phys_addr_t addr)
 {
-	if (le_to_cpu64(header->bytenr) != addr) {
+	if (le64_to_cpu(header->bytenr) != addr) {
 		pr_err("btrfs_header.bytenr is not equal node addr\n");
 		return -EBADR;
 	}
@@ -180,14 +198,14 @@ static int next(struct btrfs_data *data, struct btrfs_leaf_descriptor *desc,
 		if (err)
 			return -err;
 
-		err = btrfs_read_logical(data, le_to_cpu64(node.addr), &head,
+		err = btrfs_read_logical(data, le64_to_cpu(node.addr), &head,
 					 sizeof(head), 0);
 		if (err)
 			return -err;
-		check_btrfs_header(data, &head, le_to_cpu64(node.addr));
+		check_btrfs_header(data, &head, le64_to_cpu(node.addr));
 
-		save_ref(desc, le_to_cpu64(node.addr), 0,
-			 le_to_cpu32(head.nitems), !head.level);
+		save_ref(desc, le64_to_cpu(node.addr), 0,
+			 le32_to_cpu(head.nitems), !head.level);
 	}
 	err = btrfs_read_logical(data,
 				 desc->data[desc->depth - 1].iter *
@@ -197,9 +215,9 @@ static int next(struct btrfs_data *data, struct btrfs_leaf_descriptor *desc,
 				 &leaf, sizeof(leaf), 0);
 	if (err)
 		return -err;
-	*outsize = le_to_cpu32(leaf.size);
+	*outsize = le32_to_cpu(leaf.size);
 	*outaddr = desc->data[desc->depth - 1].addr +
-		   sizeof(struct btrfs_header) + le_to_cpu32(leaf.offset);
+		   sizeof(struct btrfs_header) + le32_to_cpu(leaf.offset);
 	*key_out = leaf.key;
 	return 1;
 }
@@ -211,7 +229,7 @@ static int lower_bound(struct btrfs_data *data,
 			 struct btrfs_leaf_descriptor *desc,
 			 int recursion_depth)
 {
-	phys_addr_t addr = le_to_cpu64(root);
+	phys_addr_t addr = le64_to_cpu(root);
 	int depth = -1;
 
 	if (desc) {
@@ -231,7 +249,7 @@ static int lower_bound(struct btrfs_data *data,
 
 
 	pr_info(
-		"retrieving %" PRIxUINT64_T " %x %" PRIxUINT64_T "\n",
+		"retrieving %08x %x %08x\n",
 		key_in->object_id, key_in->type, key_in->offset);
 
 	while (1) {
@@ -252,7 +270,7 @@ reiter:
 			struct btrfs_internal_node node, node_last;
 			int have_last = 0;
 			memset(&node_last, 0, sizeof(node_last));
-			for (i = 0; i < le_to_cpu32(head.nitems); i++) {
+			for (i = 0; i < le32_to_cpu(head.nitems); i++) {
 				err = btrfs_read_logical(
 					data, addr + i * sizeof(node), &node,
 					sizeof(node), recursion_depth + 1);
@@ -260,8 +278,8 @@ reiter:
 					return err;
 
 				pr_info(
-					"internal node (depth %d) %" PRIxUINT64_T
-					" %x %" PRIxUINT64_T "\n",
+					"internal node (depth %d) %08x
+					" %x %08x\n",
 					depth, node.key.object_id,
 					node.key.type, node.key.offset);
 
@@ -271,12 +289,12 @@ reiter:
 						err = save_ref(
 							desc,
 							addr - sizeof(head), i,
-							le_to_cpu32(
+							le32_to_cpu(
 								head.nitems),
 							0);
 					if (err)
 						return err;
-					addr = le_to_cpu64(node.addr);
+					addr = le64_to_cpu(node.addr);
 					goto reiter;
 				}
 				if (key_cmp(&node.key, key_in) > 0)
@@ -290,11 +308,11 @@ reiter:
 					err = save_ref(desc,
 						       addr - sizeof(head),
 						       i - 1,
-						       le_to_cpu32(head.nitems),
+						       le32_to_cpu(head.nitems),
 						       0);
 				if (err)
 					return err;
-				addr = le_to_cpu64(node_last.addr);
+				addr = le64_to_cpu(node_last.addr);
 				goto reiter;
 			}
 			*outsize = 0;
@@ -302,14 +320,14 @@ reiter:
 			memset(key_out, 0, sizeof(*key_out));
 			if (desc)
 				return save_ref(desc, addr - sizeof(head), -1,
-						le_to_cpu32(head.nitems), 0);
+						le32_to_cpu(head.nitems), 0);
 			return 0;
 		}
 		{
 			unsigned i;
 			struct btrfs_leaf_node leaf, leaf_last;
 			int have_last = 0;
-			for (i = 0; i < le_to_cpu32(head.nitems); i++) {
+			for (i = 0; i < le32_to_cpu(head.nitems); i++) {
 				err = btrfs_read_logical(
 					data, addr + i * sizeof(leaf), &leaf,
 					sizeof(leaf), recursion_depth + 1);
@@ -317,22 +335,22 @@ reiter:
 					return err;
 
 				pr_info(
-					"leaf (depth %d) %" PRIxUINT64_T
-					" %x %" PRIxUINT64_T "\n",
+					"leaf (depth %d) %08x
+					" %x %08x\n",
 					depth, leaf.key.object_id,
 					leaf.key.type, leaf.key.offset);
 
 				if (key_cmp(&leaf.key, key_in) == 0) {
 					memcpy(key_out, &leaf.key,
 					       sizeof(*key_out));
-					*outsize = le_to_cpu32(leaf.size);
+					*outsize = le32_to_cpu(leaf.size);
 					*outaddr =
-						addr + le_to_cpu32(leaf.offset);
+						addr + le32_to_cpu(leaf.offset);
 					if (desc)
 						return save_ref(
 							desc,
 							addr - sizeof(head), i,
-							le_to_cpu32(
+							le32_to_cpu(
 								head.nitems),
 							1);
 					return 0;
@@ -348,12 +366,12 @@ reiter:
 			if (have_last) {
 				memcpy(key_out, &leaf_last.key,
 				       sizeof(*key_out));
-				*outsize = le_to_cpu32(leaf_last.size);
-				*outaddr = addr + le_to_cpu32(leaf_last.offset);
+				*outsize = le32_to_cpu(leaf_last.size);
+				*outaddr = addr + le32_to_cpu(leaf_last.offset);
 				if (desc)
 					return save_ref(
 						desc, addr - sizeof(head),
-						i - 1, le_to_cpu32(head.nitems),
+						i - 1, le32_to_cpu(head.nitems),
 						1);
 				return 0;
 			}
@@ -362,7 +380,7 @@ reiter:
 			memset(key_out, 0, sizeof(*key_out));
 			if (desc)
 				return save_ref(desc, addr - sizeof(head), -1,
-						le_to_cpu32(head.nitems), 1);
+						le32_to_cpu(head.nitems), 1);
 			return 0;
 		}
 	}
@@ -379,13 +397,14 @@ struct find_device_ctx {
 static int find_device_iter(const char *name, void *data)
 {
 	struct find_device_ctx *ctx = data;
-	struct device dev;
+	struct device *dev;
 	int err;
 	struct btrfs_superblock sb;
 
 	dev = device_open(name);
 	if (!dev)
 		return 0;
+
 	if (!dev->disk) {
 		device_close(dev);
 		return 0;
@@ -469,12 +488,10 @@ static int btrfs_read_from_chunk(struct btrfs_data *data,
        With RAID5-like it will be more difficult.  */
 	stripe += stripen + redundancy;
 
-	paddr = le_to_cpu64(stripe->offset) + stripe_offset;
+	paddr = le64_to_cpu(stripe->offset) + stripe_offset;
 
 	pr_info(
-		"stripe %" PRIxUINT64_T " maps to 0x%" PRIxUINT64_T
-		"\n"
-		"reading paddr 0x%" PRIxUINT64_T "\n",
+		"stripe %08x maps to 0x%08x reading paddr 0x%08x\n",
 		stripen, stripe->offset, paddr);
 
 	dev = find_device(data, stripe->device_id);
@@ -509,8 +526,7 @@ static void rebuild_raid5(char *dest, struct raid56_buffer *buffers,
 		return;
 	}
 
-	pr_info( "rebuilding RAID 5 stripe #%" PRIuUINT64_T "\n",
-		i);
+	pr_info( "rebuilding RAID 5 stripe #%08x\n", i);
 
 	for (i = 0, first = 1; i < nstripes; i++) {
 		if (!buffers[i].data_is_valid)
@@ -554,8 +570,8 @@ static int raid56_read_retry(struct btrfs_data *data,
 {
 	struct raid56_buffer *buffers;
 	uint64_t nstripes = le16_to_cpu(chunk->nstripes);
-	uint64_t chunk_type = le_to_cpu64(chunk->type);
-	int ret = ERR_OUT_OF_MEMORY;
+	uint64_t chunk_type = le64_to_cpu(chunk->type);
+	int ret = -ENOMEM;
 	uint64_t i, failed_devices;
 
 	buffers = calloc(nstripes, sizeof(*buffers));
@@ -580,18 +596,13 @@ static int raid56_read_retry(struct btrfs_data *data,
        */
 		stripe = (struct btrfs_chunk_stripe *)(chunk + 1) + i;
 
-		paddr = le_to_cpu64(stripe->offset) + stripe_offset;
-		pr_info(
-			"reading paddr %" PRIxUINT64_T
-			" from stripe ID %" PRIxUINT64_T "\n",
+		paddr = le64_to_cpu(stripe->offset) + stripe_offset;
+		pr_info("reading paddr %08x from stripe ID %08x\n", 
 			paddr, stripe->device_id);
 
 		dev = find_device(data, stripe->device_id);
 		if (!dev) {
-			pr_info(
-				"stripe %" PRIuUINT64_T
-				" FAILED (dev ID %" PRIxUINT64_T ")\n",
-				i, stripe->device_id);
+			pr_info("stripe %u FAILED (dev ID %08x)\n", i, stripe->device_id);
 			failed_devices++;
 			continue;
 		}
@@ -601,39 +612,27 @@ static int raid56_read_retry(struct btrfs_data *data,
 				buffers[i].buf);
 		if (err == 0) {
 			buffers[i].data_is_valid = 1;
-			pr_info(
-				"stripe %" PRIuUINT64_T
-				" OK (dev ID %" PRIxUINT64_T ")\n",
-				i, stripe->device_id);
+			pr_info("stripe %u OK (dev ID %08x)\n", i, stripe->device_id);
 		} else {
-			pr_info(
-				"stripe %" PRIuUINT64_T
-				" READ FAILED (dev ID %" PRIxUINT64_T
-				")\n",
-				i, stripe->device_id);
+			pr_info("stripe %u READ FAILED (dev ID %08x)\n",
+						i, stripe->device_id);
 			failed_devices++;
 		}
 	}
 
 	if (failed_devices > 1 && (chunk_type & BTRFS_CHUNK_TYPE_RAID5)) {
-		pr_info(
-			"not enough disks for RAID 5: total %" PRIuUINT64_T
-			", missing %" PRIuUINT64_T "\n",
-			nstripes, failed_devices);
-		ret = ERR_READ_ERROR;
+		pr_info("not enough disks for RAID 5: total %u, missing %u\n",
+				nstripes, failed_devices);
+		ret = -EINVAL;
 		goto cleanup;
 	} else if (failed_devices > 2 &&
 		   (chunk_type & BTRFS_CHUNK_TYPE_RAID6)) {
-		pr_info(
-			"not enough disks for RAID 6: total %" PRIuUINT64_T
-			", missing %" PRIuUINT64_T "\n",
-			nstripes, failed_devices);
-		ret = ERR_READ_ERROR;
+		pr_info("not enough disks for RAID 6: total %u, missing %u\n",
+				nstripes, failed_devices);
+		ret = -EINVAL;
 		goto cleanup;
 	} else
-		pr_info(
-			"enough disks for RAID 5: total %" PRIuUINT64_T
-			", missing %" PRIuUINT64_T "\n",
+		pr_info("enough disks for RAID 5: total %u, missing %u\n",
 			nstripes, failed_devices);
 
 	/* We have enough disks. So, rebuild the data. */
@@ -668,7 +667,7 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 		size_t chsize;
 		phys_addr_t chaddr;
 
-		pr_info( "searching for laddr %" PRIxUINT64_T "\n",
+		pr_info( "searching for laddr %08x\n",
 			addr);
 		for (ptr = data->sblock.bootstrap_mapping;
 		     ptr < data->sblock.bootstrap_mapping +
@@ -678,9 +677,9 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 			if (key->type != BTRFS_ITEM_TYPE_CHUNK)
 				break;
 			chunk = (struct btrfs_chunk_item *)(key + 1);
-			if (le_to_cpu64(key->offset) <= addr &&
-			    addr < le_to_cpu64(key->offset) +
-					    le_to_cpu64(chunk->size))
+			if (le64_to_cpu(key->offset) <= addr &&
+			    addr < le64_to_cpu(key->offset) +
+					    le64_to_cpu(chunk->size))
 				goto chunk_found;
 			ptr += sizeof(*key) + sizeof(*chunk) +
 			       sizeof(struct btrfs_chunk_stripe) *
@@ -698,7 +697,7 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 			return err;
 		key = &key_out;
 		if (key->type != BTRFS_ITEM_TYPE_CHUNK ||
-		    !(le_to_cpu64(key->offset) <= addr)) {
+		    !(le64_to_cpu(key->offset) <= addr)) {
 			pr_err("couldn't find the chunk descriptor\n");
 			return -EBADR;
 		}
@@ -731,7 +730,7 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 chunk_found : {
 	uint64_t stripen;
 	uint64_t stripe_offset;
-	uint64_t off = addr - le_to_cpu64(key->offset);
+	uint64_t off = addr - le64_to_cpu(key->offset);
 	uint64_t chunk_stripe_length;
 	uint16_t nstripes;
 	unsigned redundancy = 1;
@@ -740,29 +739,27 @@ chunk_found : {
 	uint64_t parities_pos = 0;
 
 	is_raid56 =
-		!!(le_to_cpu64(chunk->type) &
+		!!(le64_to_cpu(chunk->type) &
 		   (BTRFS_CHUNK_TYPE_RAID5 | BTRFS_CHUNK_TYPE_RAID6));
 
-	if (le_to_cpu64(chunk->size) <= off) {
+	if (le64_to_cpu(chunk->size) <= off) {
 		pr_err("couldn't find the chunk descriptor\n");
 		return -EBADR;
 	}
 
 	nstripes = le16_to_cpu(chunk->nstripes) ?: 1;
-	chunk_stripe_length = le_to_cpu64(chunk->stripe_length) ?: 512;
-	pr_info(
-		"chunk 0x%" PRIxUINT64_T "+0x%" PRIxUINT64_T
-		" (%d stripes (%d substripes) of %" PRIxUINT64_T ")\n",
-		le_to_cpu64(key->offset), le_to_cpu64(chunk->size), nstripes,
+	chunk_stripe_length = le64_to_cpu(chunk->stripe_length) ?: 512;
+	pr_info("chunk 0x%08x+0x%08x, (%d stripes (%d substripes) of %08x)\n",
+		le64_to_cpu(key->offset), le64_to_cpu(chunk->size), nstripes,
 		le16_to_cpu(chunk->nsubstripes), chunk_stripe_length);
 
-	switch (le_to_cpu64(chunk->type) &
+	switch (le64_to_cpu(chunk->type) &
 		~BTRFS_CHUNK_TYPE_BITS_DONTCARE) {
 	case BTRFS_CHUNK_TYPE_SINGLE: {
 		uint64_t stripe_length;
 		pr_info( "single\n");
 		stripe_length =
-			divmod64(le_to_cpu64(chunk->size), nstripes, NULL);
+			divmod64(le64_to_cpu(chunk->size), nstripes, NULL);
 
 		/* For single, there should be exactly 1 stripe. */
 		if (le16_to_cpu(chunk->nstripes) != 1) {
@@ -787,7 +784,7 @@ chunk_found : {
 		pr_info( "RAID1 (copies: %d)\n", ++redundancy);
 		stripen = 0;
 		stripe_offset = off;
-		csize = le_to_cpu64(chunk->size) - off;
+		csize = le64_to_cpu(chunk->size) - off;
 
 		/*
 	      * Redundancy, and substripes only apply to RAID10, and there
@@ -842,7 +839,7 @@ chunk_found : {
 
 		redundancy = 1; /* no redundancy for now */
 
-		if (le_to_cpu64(chunk->type) & BTRFS_CHUNK_TYPE_RAID5) {
+		if (le64_to_cpu(chunk->type) & BTRFS_CHUNK_TYPE_RAID5) {
 			pr_info( "RAID5\n");
 			nparities = 1;
 		} else {
@@ -917,7 +914,7 @@ chunk_found : {
 		break;
 	}
 	default:
-		pr_info("unsupported RAID flags %08x", le_to_cpu64(chunk->type));
+		pr_info("unsupported RAID flags %08x", le64_to_cpu(chunk->type));
 		return -EOPNOTSUPP;
 	}
 	if (csize == 0) {
@@ -938,15 +935,12 @@ chunk_found : {
 	for (j = 0; j < 2; j++) {
 		size_t est_chunk_alloc = 0;
 
-		pr_info(
-			"chunk 0x%" PRIxUINT64_T "+0x%" PRIxUINT64_T
-			" (%d stripes (%d substripes) of %" PRIxUINT64_T
-			")\n",
-			le_to_cpu64(key->offset), le_to_cpu64(chunk->size),
+		pr_info("chunk 0x%08x+0x%08x %d stripes (%d substripes) of %08x\n",
+			le64_to_cpu(key->offset), le64_to_cpu(chunk->size),
 			le16_to_cpu(chunk->nstripes),
 			le16_to_cpu(chunk->nsubstripes),
-			le_to_cpu64(chunk->stripe_length));
-		pr_info( "reading laddr 0x%" PRIxUINT64_T "\n",
+			le64_to_cpu(chunk->stripe_length);
+		pr_info( "reading laddr 0x%08x\n",
 			addr);
 
 		if (mul(sizeof(struct btrfs_chunk_stripe),
@@ -1167,7 +1161,7 @@ static ssize_t btrfs_lzo_decompress(char *ibuf, size_t isize, off_t off,
 	size_t ret = 0;
 	char *ibuf0 = ibuf;
 
-	total_size = le_to_cpu32(get_unaligned32(ibuf));
+	total_size = le32_to_cpu(get_unaligned32(ibuf));
 	ibuf += sizeof(total_size);
 
 	if (isize < total_size)
@@ -1179,7 +1173,7 @@ static ssize_t btrfs_lzo_decompress(char *ibuf, size_t isize, off_t off,
 		if (((ibuf - ibuf0) & 0xffc) == 0xffc)
 			ibuf = ((ibuf - ibuf0 + 3) & ~3) + ibuf0;
 
-		cblock_size = le_to_cpu32(get_unaligned32(ibuf));
+		cblock_size = le32_to_cpu(get_unaligned32(ibuf));
 		ibuf += sizeof(cblock_size);
 
 		if (cblock_size > BTRFS_LZO_BLOCK_MAX_CSIZE)
@@ -1196,7 +1190,7 @@ static ssize_t btrfs_lzo_decompress(char *ibuf, size_t isize, off_t off,
 		if (((ibuf - ibuf0) & 0xffc) == 0xffc)
 			ibuf = ((ibuf - ibuf0 + 3) & ~3) + ibuf0;
 
-		cblock_size = le_to_cpu32(get_unaligned32(ibuf));
+		cblock_size = le32_to_cpu(get_unaligned32(ibuf));
 		ibuf += sizeof(cblock_size);
 
 		if (cblock_size > BTRFS_LZO_BLOCK_MAX_CSIZE)
@@ -1288,7 +1282,7 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 				pr_err("extent descriptor is too short");
 				return -EBADR;
 			}
-			data->extstart = le_to_cpu64(key_out.offset);
+			data->extstart = le64_to_cpu(key_out.offset);
 			data->extsize = elemsize;
 			data->extent = malloc(elemsize);
 			data->extino = ino;
@@ -1302,19 +1296,19 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 				return err;
 
 			data->extend = data->extstart +
-				       le_to_cpu64(data->extent->size);
+				       le64_to_cpu(data->extent->size);
 			if (data->extent->type == BTRFS_EXTENT_REGULAR &&
 			    (char *)data->extent + elemsize >=
 				    (char *)&data->extent->filled +
 					    sizeof(data->extent->filled))
 				data->extend =
 					data->extstart +
-					le_to_cpu64(data->extent->filled);
+					le64_to_cpu(data->extent->filled);
 
 			pr_info(
 				"regular extent 0x%08x + 0x%08x\n",
-				le_to_cpu64(key_out.offset),
-				le_to_cpu64(data->extent->size));
+				le64_to_cpu(key_out.offset),
+				le64_to_cpu(data->extent->size));
 			/*
 	   * The way of extent item iteration is pretty bad, it completely
 	   * requires all extents are contiguous, which is not ensured.
@@ -1341,7 +1335,7 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 					    BTRFS_ITEM_TYPE_EXTENT_ITEM)
 					return pos - pos0;
 
-				csize = le_to_cpu64(key_out.offset) - pos;
+				csize = le64_to_cpu(key_out.offset) - pos;
 				if (csize > len)
 					csize = len;
 
@@ -1430,13 +1424,13 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 				uint64_t zsize;
 				ssize_t ret;
 
-				zsize = le_to_cpu64(
+				zsize = le64_to_cpu(
 					data->extent->compressed_size);
 				tmp = malloc(zsize);
 				if (!tmp)
 					return -1;
 				err = btrfs_read_logical(
-					data, le_to_cpu64(data->extent->laddr),
+					data, le64_to_cpu(data->extent->laddr),
 					tmp, zsize, 0);
 				if (err) {
 					free(tmp);
@@ -1448,7 +1442,7 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 					ret = zlib_decompress(
 						tmp, zsize,
 						extoff +
-							le_to_cpu64(
+							le64_to_cpu(
 								data->extent
 									->offset),
 						buf, csize);
@@ -1457,7 +1451,7 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 					ret = btrfs_lzo_decompress(
 						tmp, zsize,
 						extoff +
-							le_to_cpu64(
+							le64_to_cpu(
 								data->extent
 									->offset),
 						buf, csize);
@@ -1466,7 +1460,7 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 					ret = btrfs_zstd_decompress(
 						tmp, zsize,
 						extoff +
-							le_to_cpu64(
+							le64_to_cpu(
 								data->extent
 									->offset),
 						buf, csize);
@@ -1486,8 +1480,8 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 			}
 			err = btrfs_read_logical(
 				data,
-				le_to_cpu64(data->extent->laddr) +
-					le_to_cpu64(data->extent->offset) +
+				le64_to_cpu(data->extent->laddr) +
+					le64_to_cpu(data->extent->offset) +
 					extoff,
 				buf, csize, 0);
 			if (err)
@@ -1702,7 +1696,7 @@ static int find_path(struct btrfs_data *data, const char *path,
 				return err;
 			}
 
-			if (add(le_to_cpu64(inode.size), strlen(path), &sz) ||
+			if (add(le64_to_cpu(inode.size), strlen(path), &sz) ||
 			    add(sz, 1, &sz)) {
 				free(direl);
 				free(path_alloc);
@@ -1720,15 +1714,15 @@ static int find_path(struct btrfs_data *data, const char *path,
 
 			if (btrfs_extent_read(data, cdirel->key.object_id,
 					      *tree, 0, tmp,
-					      le_to_cpu64(inode.size)) !=
-			    (ssize_t)le_to_cpu64(inode.size)) {
+					      le64_to_cpu(inode.size)) !=
+			    (ssize_t)le64_to_cpu(inode.size)) {
 				free(direl);
 				free(path_alloc);
 				free(origpath);
 				free(tmp);
 				return errno;
 			}
-			memcpy(tmp + le_to_cpu64(inode.size), path,
+			memcpy(tmp + le64_to_cpu(inode.size), path,
 			       strlen(path) + 1);
 			free(path_alloc);
 			path = path_alloc = tmp;
@@ -1918,7 +1912,7 @@ static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 			if (err)
 				errno = 0;
 			else {
-				info.mtime = le_to_cpu64(inode.mtime.sec);
+				info.mtime = le64_to_cpu(inode.mtime.sec);
 				info.mtimeset = 1;
 			}
 			c = cdirel->name[le16_to_cpu(cdirel->n)];
@@ -1970,7 +1964,7 @@ static int btrfs_open(struct file *file, const char *name)
 	}
 
 	file->data = data;
-	file->size = le_to_cpu64(inode.size);
+	file->size = le64_to_cpu(inode.size);
 
 	return err;
 }

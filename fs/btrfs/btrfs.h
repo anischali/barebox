@@ -19,6 +19,57 @@
 #define ZSTD_BTRFS_MAX_WINDOWLOG 17
 #define ZSTD_BTRFS_MAX_INPUT (1 << ZSTD_BTRFS_MAX_WINDOWLOG)
 
+#define DISK_SECTOR_BITS 9
+#define DISK_SECTOR_SIZE 0x200
+
+enum
+  {
+    BTRFS_ITEM_TYPE_INODE_ITEM = 0x01,
+    BTRFS_ITEM_TYPE_INODE_REF = 0x0c,
+    BTRFS_ITEM_TYPE_DIR_ITEM = 0x54,
+    BTRFS_ITEM_TYPE_EXTENT_ITEM = 0x6c,
+    BTRFS_ITEM_TYPE_ROOT_ITEM = 0x84,
+    BTRFS_ITEM_TYPE_ROOT_BACKREF = 0x90,
+    BTRFS_ITEM_TYPE_DEVICE = 0xd8,
+    BTRFS_ITEM_TYPE_CHUNK = 0xe4
+  };
+
+enum
+  {
+    BTRFS_ROOT_VOL_OBJECTID = 5,
+    BTRFS_TREE_ROOT_OBJECTID = 0x100,
+  };
+
+struct btrfs_root_item
+{
+  uint8_t dummy[0xb0];
+  uint64_t tree;
+  uint64_t inode;
+};
+
+struct btrfs_key
+{
+  uint64_t object_id;
+  uint8_t type;
+  uint64_t offset;
+} __packed;
+
+
+struct btrfs_root_backref
+{
+  uint64_t inode_id;
+  uint64_t seqnr;
+  uint16_t n;
+  char name[0];
+};
+
+struct btrfs_inode_ref
+{
+  uint64_t idxid;
+  uint16_t n;
+  char name[0];
+};
+
 typedef uint8_t btrfs_checksum_t[0x20];
 typedef uint16_t btrfs_uuid_t[8];
 
@@ -26,7 +77,7 @@ struct btrfs_device {
 	uint64_t device_id;
 	uint64_t size;
 	uint8_t dummy[0x62 - 0x10];
-} PACKED;
+} __packed;
 
 struct btrfs_superblock {
 	btrfs_checksum_t checksum;
@@ -43,7 +94,7 @@ struct btrfs_superblock {
 	char label[0x100];
 	uint8_t dummy4[0x100];
 	uint8_t bootstrap_mapping[0x800];
-} PACKED;
+} __packed;
 
 struct btrfs_header {
 	btrfs_checksum_t checksum;
@@ -52,10 +103,10 @@ struct btrfs_header {
 	uint8_t dummy[0x28];
 	uint32_t nitems;
 	uint8_t level;
-} PACKED;
+} __packed;
 
 struct btrfs_device_desc {
-	device_t dev;
+	struct device dev;
 	uint64_t id;
 };
 
@@ -95,25 +146,25 @@ struct btrfs_chunk_item {
 	uint8_t dummy2[0xc];
 	uint16_t nstripes;
 	uint16_t nsubstripes;
-} PACKED;
+} __packed;
 
 struct btrfs_chunk_stripe {
 	uint64_t device_id;
 	uint64_t offset;
 	btrfs_uuid_t device_uuid;
-} PACKED;
+} __packed;
 
 struct btrfs_leaf_node {
 	struct btrfs_key key;
 	uint32_t offset;
 	uint32_t size;
-} PACKED;
+} __packed;
 
 struct btrfs_internal_node {
 	struct btrfs_key key;
 	uint64_t addr;
 	uint64_t dummy;
-} PACKED;
+} __packed;
 
 struct btrfs_dir_item {
 	struct btrfs_key key;
@@ -125,7 +176,7 @@ struct btrfs_dir_item {
 #define BTRFS_DIR_ITEM_TYPE_SYMLINK 7
 	uint8_t type;
 	char name[0];
-} PACKED;
+} __packed;
 
 struct btrfs_leaf_descriptor {
 	unsigned depth;
@@ -141,14 +192,14 @@ struct btrfs_leaf_descriptor {
 struct btrfs_time {
 	int64_t sec;
 	uint32_t nanosec;
-} PACKED;
+} __packed;
 
 struct btrfs_inode {
 	uint8_t dummy1[0x10];
 	uint64_t size;
 	uint8_t dummy2[0x70];
 	struct btrfs_time mtime;
-} PACKED;
+} __packed;
 
 struct btrfs_extent_data {
 	uint64_t dummy;
@@ -166,7 +217,7 @@ struct btrfs_extent_data {
 			uint64_t filled;
 		};
 	};
-} PACKED;
+} __packed;
 
 #define BTRFS_EXTENT_INLINE 0
 #define BTRFS_EXTENT_REGULAR 1
@@ -179,53 +230,7 @@ struct btrfs_extent_data {
 #define BTRFS_OBJECT_ID_CHUNK 0x100
 
 
-enum
-  {
-    BTRFS_ITEM_TYPE_INODE_ITEM = 0x01,
-    BTRFS_ITEM_TYPE_INODE_REF = 0x0c,
-    BTRFS_ITEM_TYPE_DIR_ITEM = 0x54,
-    BTRFS_ITEM_TYPE_EXTENT_ITEM = 0x6c,
-    BTRFS_ITEM_TYPE_ROOT_ITEM = 0x84,
-    BTRFS_ITEM_TYPE_ROOT_BACKREF = 0x90,
-    BTRFS_ITEM_TYPE_DEVICE = 0xd8,
-    BTRFS_ITEM_TYPE_CHUNK = 0xe4
-  };
 
-enum
-  {
-    BTRFS_ROOT_VOL_OBJECTID = 5,
-    BTRFS_TREE_ROOT_OBJECTID = 0x100,
-  };
-
-struct btrfs_root_item
-{
-  uint8_t dummy[0xb0];
-  uint64_t tree;
-  uint64_t inode;
-};
-
-struct btrfs_key
-{
-  uint64_t object_id;
-  uint8_t type;
-  uint64_t offset;
-} PACKED;
-
-
-struct btrfs_root_backref
-{
-  uint64_t inode_id;
-  uint64_t seqnr;
-  uint16_t n;
-  char name[0];
-};
-
-struct btrfs_inode_ref
-{
-  uint64_t idxid;
-  uint16_t n;
-  char name[0];
-};
 
 
 #endif

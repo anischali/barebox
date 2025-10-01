@@ -45,6 +45,7 @@
 #include <malloc.h>
 #include <errno.h>
 #include <linux/time.h>
+#include <linux/overflow.h>
 #include <asm/byteorder.h>
 #include <errno.h>
 #include "btrfs.h"
@@ -63,10 +64,21 @@ struct ext_filesystem {
 	struct device *dev;
 };
 
-struct disk {
+struct btrfs_disk {
 	struct cdev *cdev;
 	struct btrfs_data *data;
 };
+
+struct btrfs_file {
+	struct device *dev;
+	size_t size;
+	off_t offset;
+	struct btrfs_data *data;
+}
+
+#define dev_to_disk(dev) NULL
+#define crypto_xor(res, src, buf, size)
+#define device_open(dev)sssssssssssssssssssssssssssssssssssssssssssssssssssssss
 
 static phys_addr_t superblock_sectors[] = { 64 * 2, 64 * 1024 * 2,
 					    256 * 1048576 * 2,
@@ -75,7 +87,57 @@ static phys_addr_t superblock_sectors[] = { 64 * 2, 64 * 1024 * 2,
 static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 				void *buf, size_t size, int recursion_depth);
 
-static int read_sblock(struct disk disk, struct btrfs_superblock *sb)
+
+uint64_t
+divmod64 (uint64_t n, uint64_t d, uint64_t *r)
+{
+  /* This algorithm is typically implemented by hardware. The idea
+     is to get the highest bit in N, 64 times, by keeping
+     upper(N * 2^i) = (Q * D + M), where upper
+     represents the high 64 bits in 128-bits space.  */
+  unsigned bits = 64;
+  uint64_t q = 0;
+  uint64_t m = 0;
+
+  /* ARM and IA64 don't have a fast 32-bit division.
+     Using that code would just make us use software division routines, calling
+     ourselves indirectly and hence getting infinite recursion.
+  */
+#if !DIVISION_IN_SOFTWARE
+  /* Skip the slow computation if 32-bit arithmetic is possible.  */
+  if (n < 0xffffffff && d < 0xffffffff)
+    {
+      if (r)
+	*r = ((uint32_t) n) % (uint32_t) d;
+
+      return ((uint32_t) n) / (uint32_t) d;
+    }
+#endif
+
+  while (bits--)
+    {
+      m <<= 1;
+
+      if (n & (1ULL << 63))
+	m |= 1;
+
+      q <<= 1;
+      n <<= 1;
+
+      if (m >= d)
+	{
+	  q |= 1;
+	  m -= d;
+	}
+    }
+
+  if (r)
+    *r = m;
+
+  return q;
+}
+
+static int read_sblock(struct btrfs_disk *disk, struct btrfs_superblock *sb)
 {
 	struct btrfs_superblock sblock;
 	unsigned i;
@@ -154,8 +216,8 @@ static int save_ref(struct btrfs_leaf_descriptor *desc, phys_addr_t addr,
 		void *newdata;
 		size_t sz;
 
-		if (mul(desc->allocated, 2, &desc->allocated) ||
-		    mul(desc->allocated, sizeof(desc->data[0]), &sz))
+		if (check_mul_overflow(desc->allocated, 2, &desc->allocated) ||
+		    check_mul_overflow(desc->allocated, sizeof(desc->data[0]), &sz))
 			return -ERANGE;
 
 		newdata = realloc(desc->data, sz);
@@ -277,9 +339,7 @@ reiter:
 				if (err)
 					return err;
 
-				pr_info(
-					"internal node (depth %d) %08x
-					" %x %08x\n",
+				pr_info("internal node (depth %d) %08x %x %08x\n",
 					depth, node.key.object_id,
 					node.key.type, node.key.offset);
 
@@ -335,8 +395,7 @@ reiter:
 					return err;
 
 				pr_info(
-					"leaf (depth %d) %08x
-					" %x %08x\n",
+					"leaf (depth %d) %08x %x %08x\n",
 					depth, leaf.key.object_id,
 					leaf.key.type, leaf.key.offset);
 
@@ -390,7 +449,7 @@ reiter:
 struct find_device_ctx {
 	struct btrfs_data *data;
 	uint64_t id;
-	struct device dev_found;
+	struct device *dev_found;
 };
 
 /* Helper for find_device.  */
@@ -405,11 +464,11 @@ static int find_device_iter(const char *name, void *data)
 	if (!dev)
 		return 0;
 
-	if (!dev->disk) {
+	if (!dev_to_disk(dev)) { 
 		device_close(dev);
 		return 0;
 	}
-	err = read_sblock(dev->disk, &sb);
+	err = read_sblock(dev_to_disk(dev), &sb);
 	if (err == -EBADR) {
 		device_close(dev);
 		errno = 0;
@@ -430,7 +489,7 @@ static int find_device_iter(const char *name, void *data)
 	return 1;
 }
 
-static struct device find_device(struct btrfs_data *data, uint64_t id)
+static struct device *find_device(struct btrfs_data *data, uint64_t id)
 {
 	struct find_device_ctx ctx = { .data = data,
 				       .id = id,
@@ -448,11 +507,11 @@ static struct device find_device(struct btrfs_data *data, uint64_t id)
 		void *tmp;
 		size_t sz;
 
-		if (mul(data->n_devices_attached, 2,
+		if (check_mul_overflow(data->n_devices_attached, 2,
 			&data->n_devices_allocated) ||
-		    add(data->n_devices_allocated, 1,
+		    check_add_overflow(data->n_devices_allocated, 1,
 			&data->n_devices_allocated) ||
-		    mul(data->n_devices_allocated,
+		    check_mul_overflow(data->n_devices_allocated,
 			sizeof(data->devices_attached[0]), &sz))
 			goto fail;
 
@@ -480,7 +539,7 @@ static int btrfs_read_from_chunk(struct btrfs_data *data,
 {
 	struct btrfs_chunk_stripe *stripe;
 	phys_addr_t paddr;
-	struct device dev;
+	struct device *dev;
 	int err;
 
 	stripe = (struct btrfs_chunk_stripe *)(chunk + 1);
@@ -490,8 +549,7 @@ static int btrfs_read_from_chunk(struct btrfs_data *data,
 
 	paddr = le64_to_cpu(stripe->offset) + stripe_offset;
 
-	pr_info(
-		"stripe %08x maps to 0x%08x reading paddr 0x%08x\n",
+	pr_info("stripe %08x maps to 0x%08x reading paddr 0x%08x\n",
 		stripen, stripe->offset, paddr);
 
 	dev = find_device(data, stripe->device_id);
@@ -501,7 +559,7 @@ static int btrfs_read_from_chunk(struct btrfs_data *data,
 		return -EINVAL;
 	}
 
-	err = disk_read(dev->disk, paddr >> DISK_SECTOR_BITS,
+	err = disk_read(dev_to_disk(dev), paddr >> DISK_SECTOR_BITS,
 			paddr & (DISK_SECTOR_SIZE - 1), csize, buf);
 	return err;
 }
@@ -559,8 +617,6 @@ static void rebuild_raid6(struct raid56_buffer *buffers, uint64_t nstripes,
 			  uint64_t stripen)
 
 {
-	raid6_recover_gen(buffers, nstripes, stripen, parities_pos, dest, 0,
-			  csize, 0, raid6_recover_read_buffer);
 }
 
 static int raid56_read_retry(struct btrfs_data *data,
@@ -579,7 +635,7 @@ static int raid56_read_retry(struct btrfs_data *data,
 		goto cleanup;
 
 	for (i = 0; i < nstripes; i++) {
-		buffers[i].buf = zalloc(csize);
+		buffers[i].buf = xzalloc(csize);
 		if (!buffers[i].buf)
 			goto cleanup;
 	}
@@ -587,7 +643,7 @@ static int raid56_read_retry(struct btrfs_data *data,
 	for (failed_devices = 0, i = 0; i < nstripes; i++) {
 		struct btrfs_chunk_stripe *stripe;
 		phys_addr_t paddr;
-		struct device dev;
+		struct device *dev;
 		int err;
 
 		/*
@@ -607,7 +663,7 @@ static int raid56_read_retry(struct btrfs_data *data,
 			continue;
 		}
 
-		err = disk_read(dev->disk, paddr >> DISK_SECTOR_BITS,
+		err = disk_read(dev_to_disk(dev), paddr >> DISK_SECTOR_BITS,
 				paddr & (DISK_SECTOR_SIZE - 1), csize,
 				buffers[i].buf);
 		if (err == 0) {
@@ -687,7 +743,7 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 		}
 
 		key_in.object_id =
-			cpu_to_le64_compile_time(BTRFS_OBJECT_ID_CHUNK);
+			__constant_cpu_to_le64(BTRFS_OBJECT_ID_CHUNK);
 		key_in.type = BTRFS_ITEM_TYPE_CHUNK;
 		key_in.offset = cpu_to_le64(addr);
 		err = lower_bound(data, &key_in, &key_out,
@@ -939,13 +995,13 @@ chunk_found : {
 			le64_to_cpu(key->offset), le64_to_cpu(chunk->size),
 			le16_to_cpu(chunk->nstripes),
 			le16_to_cpu(chunk->nsubstripes),
-			le64_to_cpu(chunk->stripe_length);
+			le64_to_cpu(chunk->stripe_length));
 		pr_info( "reading laddr 0x%08x\n",
 			addr);
 
-		if (mul(sizeof(struct btrfs_chunk_stripe),
+		if (check_mul_overflow(sizeof(struct btrfs_chunk_stripe),
 			le16_to_cpu(chunk->nstripes), &est_chunk_alloc) ||
-		    add(est_chunk_alloc, sizeof(struct btrfs_chunk_item),
+		    check_add_overflow(est_chunk_alloc, sizeof(struct btrfs_chunk_item),
 			&est_chunk_alloc) ||
 		    est_chunk_alloc > chunk->size) {
 			err = -EBADR;
@@ -994,22 +1050,22 @@ chunk_found : {
 	return 0;
 }
 
-static struct btrfs_data *btrfs_mount(struct device dev)
+static struct btrfs_data *btrfs_mount(struct device *dev)
 {
 	struct btrfs_data *data;
 	int err;
 
-	if (!dev->disk) {
+	if (!dev_to_disk(dev)) {
 		pr_err("not BtrFS\n");
 		errno = -EBADR;
 		return NULL;
 	}
 
-	data = zalloc(sizeof(*data));
+	data = xzalloc(sizeof(*data));
 	if (!data)
 		return NULL;
 
-	err = read_sblock(dev->disk, &data->sblock);
+	err = read_sblock(dev_to_disk(dev), &data->sblock);
 	if (err) {
 		free(data);
 		return NULL;
@@ -1065,183 +1121,6 @@ static int btrfs_read_inode(struct btrfs_data *data,
 		}
 
 	return btrfs_read_logical(data, elemaddr, inode, sizeof(*inode), 0);
-}
-
-static void *zstd_malloc(void *state __attribute__((unused)), size_t size)
-{
-	return malloc(size);
-}
-
-static void zstd_free(void *state __attribute__((unused)), void *address)
-{
-	return free(address);
-}
-
-static ZSTD_customMem zstd_allocator(void)
-{
-	ZSTD_customMem allocator;
-
-	allocator.customAlloc = &zstd_malloc;
-	allocator.customFree = &zstd_free;
-	allocator.opaque = NULL;
-
-	return allocator;
-}
-
-static ssize_t btrfs_zstd_decompress(char *ibuf, size_t isize, off_t off,
-				     char *obuf, size_t osize)
-{
-	void *allocated = NULL;
-	char *otmpbuf = obuf;
-	size_t otmpsize = osize;
-	ZSTD_DCtx *dctx = NULL;
-	size_t zstd_ret;
-	ssize_t ret = -1;
-
-	/*
-   * Zstd will fail if it can't fit the entire output in the destination
-   * buffer, so if osize isn't large enough, allocate a temporary buffer.
-   */
-	if (otmpsize < ZSTD_BTRFS_MAX_INPUT) {
-		allocated = malloc(ZSTD_BTRFS_MAX_INPUT);
-		if (!allocated) {
-			ret = -ENOMEM;
-			pr_err("failed allocate a zstd buffer\n");
-			goto err;
-		}
-		otmpbuf = (char *)allocated;
-		otmpsize = ZSTD_BTRFS_MAX_INPUT;
-	}
-
-	/* Create the ZSTD_DCtx. */
-	dctx = ZSTD_createDCtx_advanced(zstd_allocator());
-	if (!dctx) {
-		/* ZSTD_createDCtx_advanced() only fails if it is out of memory. */
-		pr_err("failed to create a zstd context\n");
-		ret = -ENOMEM;
-		goto err;
-	}
-
-	/*
-   * Get the real input size, there may be junk at the
-   * end of the frame.
-   */
-	isize = ZSTD_findFrameCompressedSize(ibuf, isize);
-	if (ZSTD_isError(isize)) {
-		ret = -EINVAL;
-		pr_err("zstd failed to get size, data corrupted\n");
-		goto err;
-	}
-
-	/* Decompress and check for errors. */
-	zstd_ret = ZSTD_decompressDCtx(dctx, otmpbuf, otmpsize, ibuf, isize);
-	if (ZSTD_isError(zstd_ret)) {
-		pr_err("zstd failed to decompress, data corrupted\n");
-		goto err;
-	}
-
-	/*
-   * Move the requested data into the obuf. obuf may be equal
-   * to otmpbuf, which is why memmove() is required.
-   */
-	memmove(obuf, otmpbuf + off, osize);
-	ret = osize;
-
-err:
-	free(allocated);
-	ZSTD_freeDCtx(dctx);
-
-	return ret;
-}
-
-static ssize_t btrfs_lzo_decompress(char *ibuf, size_t isize, off_t off,
-				    char *obuf, size_t osize)
-{
-	uint32_t total_size, cblock_size;
-	size_t ret = 0;
-	char *ibuf0 = ibuf;
-
-	total_size = le32_to_cpu(get_unaligned32(ibuf));
-	ibuf += sizeof(total_size);
-
-	if (isize < total_size)
-		return -1;
-
-	/* Jump forward to first block with requested data.  */
-	while (off >= BTRFS_LZO_BLOCK_SIZE) {
-		/* Don't let following uint32_t cross the page boundary.  */
-		if (((ibuf - ibuf0) & 0xffc) == 0xffc)
-			ibuf = ((ibuf - ibuf0 + 3) & ~3) + ibuf0;
-
-		cblock_size = le32_to_cpu(get_unaligned32(ibuf));
-		ibuf += sizeof(cblock_size);
-
-		if (cblock_size > BTRFS_LZO_BLOCK_MAX_CSIZE)
-			return -1;
-
-		off -= BTRFS_LZO_BLOCK_SIZE;
-		ibuf += cblock_size;
-	}
-
-	while (osize > 0) {
-		lzo_uint usize = BTRFS_LZO_BLOCK_SIZE;
-
-		/* Don't let following uint32_t cross the page boundary.  */
-		if (((ibuf - ibuf0) & 0xffc) == 0xffc)
-			ibuf = ((ibuf - ibuf0 + 3) & ~3) + ibuf0;
-
-		cblock_size = le32_to_cpu(get_unaligned32(ibuf));
-		ibuf += sizeof(cblock_size);
-
-		if (cblock_size > BTRFS_LZO_BLOCK_MAX_CSIZE)
-			return -1;
-
-		/* Block partially filled with requested data.  */
-		if (off > 0 || osize < BTRFS_LZO_BLOCK_SIZE) {
-			size_t to_copy = BTRFS_LZO_BLOCK_SIZE - off;
-			uint8_t *buf;
-
-			if (to_copy > osize)
-				to_copy = osize;
-
-			buf = malloc(BTRFS_LZO_BLOCK_SIZE);
-			if (!buf)
-				return -1;
-
-			if (lzo1x_decompress_safe((lzo_bytep)ibuf, cblock_size,
-						  buf, &usize,
-						  NULL) != LZO_E_OK) {
-				free(buf);
-				return -1;
-			}
-
-			if (to_copy > usize)
-				to_copy = usize;
-			memcpy(obuf, buf + off, to_copy);
-
-			osize -= to_copy;
-			ret += to_copy;
-			obuf += to_copy;
-			ibuf += cblock_size;
-			off = 0;
-
-			free(buf);
-			continue;
-		}
-
-		/* Decompress whole block directly to output buffer.  */
-		if (lzo1x_decompress_safe((lzo_bytep)ibuf, cblock_s,                                                                                                                                                                                  ize,
-					  (lzo_bytep)obuf, &usize,
-					  NULL) != LZO_E_OK)
-			return -1;
-
-		osize -= usize;
-		ret += usize;
-		obuf += usize;
-		ibuf += cblock_size;
-	}
-
-	return ret;
 }
 
 static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
@@ -1509,7 +1388,7 @@ static int get_root(struct btrfs_data *data, struct btrfs_key *key,
 	struct btrfs_root_item ri;
 
 	key_in.object_id =
-		cpu_to_le64_compile_time(BTRFS_ROOT_VOL_OBJECTID);
+		__constant_cpu_to_le64(BTRFS_ROOT_VOL_OBJECTID);
 	key_in.offset = 0;
 	key_in.type = BTRFS_ITEM_TYPE_ROOT_ITEM;
 	err = lower_bound(data, &key_in, &key_out, data->sblock.root_tree,
@@ -1526,13 +1405,13 @@ static int get_root(struct btrfs_data *data, struct btrfs_key *key,
 		return err;
 	key->type = BTRFS_ITEM_TYPE_DIR_ITEM;
 	key->offset = 0;
-	key->object_id = cpu_to_le64_compile_time(BTRFS_OBJECT_ID_CHUNK);
+	key->object_id = __constant_cpu_to_le64(BTRFS_OBJECT_ID_CHUNK);
 	*tree = ri.tree;
 	*type = BTRFS_DIR_ITEM_TYPE_DIRECTORY;
 	return 0;
 }
 
-static int find_path(struct btrfs_data *data, const char *path,
+static int btrfs_find_path(struct btrfs_data *data, const char *path,
 		       struct btrfs_key *key, uint64_t *tree, uint8_t *type)
 {
 	const char *slash = path;
@@ -1632,8 +1511,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 
 		struct btrfs_dir_item *cdirel;
 		if (elemsize > allocated) {
-			if (mul(2, elemsize, &allocated) ||
-			    add(allocated, 1, &sz)) {
+			if (check_mul_overflow(2, elemsize, &allocated) ||
+			    check_add_overflow(allocated, 1, &sz)) {
 				free(path_alloc);
 				free(origpath);
 				pr_err("directory item size overflow\n");
@@ -1696,8 +1575,8 @@ static int find_path(struct btrfs_data *data, const char *path,
 				return err;
 			}
 
-			if (add(le64_to_cpu(inode.size), strlen(path), &sz) ||
-			    add(sz, 1, &sz)) {
+			if (check_add_overflow(le64_to_cpu(inode.size), strlen(path), &sz) ||
+			    check_add_overflow(sz, 1, &sz)) {
 				free(direl);
 				free(path_alloc);
 				free(origpath);
@@ -1770,7 +1649,7 @@ static int find_path(struct btrfs_data *data, const char *path,
 			}
 			key->type = BTRFS_ITEM_TYPE_DIR_ITEM;
 			key->offset = 0;
-			key->object_id = cpu_to_le64_compile_time(
+			key->object_id = __constant_cpu_to_le64(
 				BTRFS_OBJECT_ID_CHUNK);
 			*tree = ri.tree;
 			break;
@@ -1803,10 +1682,10 @@ static int find_path(struct btrfs_data *data, const char *path,
 	return 0;
 }
 
-static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
+static int btrfs_dir(struct device *dev, const char *path, fs_dir_hook_t hook,
 		       void *hook_data)
 {
-	struct btrfs_data *data = btrfs_mount(device);
+	struct btrfs_data *data = btrfs_mount(dev);
 	struct btrfs_key key_in, key_out;
 	int err;
 	phys_addr_t elemaddr;
@@ -1823,7 +1702,7 @@ static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 	if (!data)
 		return errno;
 
-	err = find_path(data, path, &key_in, &tree, &type);
+	err = btrfs_find_path(data, path, &key_in, &tree, &type);
 	if (err) {
 		btrfs_unmount(data);
 		return err;
@@ -1855,8 +1734,8 @@ static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 			break;
 		}
 		if (elemsize > allocated) {
-			if (mul(2, elemsize, &allocated) ||
-			    add(allocated, 1, &sz)) {
+			if (check_mul_overflow(2, elemsize, &allocated) ||
+			    check_add_overflow(allocated, 1, &sz)) {
 				pr_err("directory element size overflow\n");
 				r = -ERANGE;
 				break;
@@ -1876,10 +1755,10 @@ static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 		}
 
 		if (direl == NULL ||
-		    add(le16_to_cpu(direl->n), le16_to_cpu(direl->m),
+		    check_add_overflow(le16_to_cpu(direl->n), le16_to_cpu(direl->m),
 			&est_size) ||
-		    add(est_size, sizeof(*direl), &est_size) ||
-		    sub(est_size, sizeof(direl->name), &est_size) ||
+		    check_add_overflow(est_size, sizeof(*direl), &est_size) ||
+		    check_sub_overflow(est_size, sizeof(direl->name), &est_size) ||
 		    est_size > allocated) {
 			errno = -ERANGE;
 			r = -errno;
@@ -1896,10 +1775,9 @@ static int btrfs_dir(struct device device, const char *path, fs_dir_hook_t hook,
 			struct dirhook_info info;
 
 			if (cdirel == NULL ||
-			    add(le16_to_cpu(cdirel->n), le16_to_cpu(cdirel->m),
-				&est_size) ||
-			    add(est_size, sizeof(*cdirel), &est_size) ||
-			    sub(est_size, sizeof(cdirel->name), &est_size) ||
+			    check_add_overflow(le16_to_cpu(cdirel->n), le16_to_cpu(cdirel->m), &est_size) ||
+			    check_add_overflow(est_size, sizeof(*cdirel), &est_size) ||
+			    check_sub_overflow(est_size, sizeof(cdirel->name), &est_size) ||
 			    est_size > allocated) {
 				errno = -ERANGE;
 				r = -errno;
@@ -1935,9 +1813,9 @@ out:
 	return -r;
 }
 
-static int btrfs_open(struct file *file, const char *name)
+static int btrfs_open(struct btrfs_file *file, const char *name)
 {
-	struct btrfs_data *data = btrfs_mount(file->device);
+	struct btrfs_data *data = btrfs_mount(file->dev);
 	int err;
 	struct btrfs_inode inode;
 	uint8_t type;
@@ -1946,7 +1824,7 @@ static int btrfs_open(struct file *file, const char *name)
 	if (!data)
 		return errno;
 
-	err = find_path(data, name, &key_in, &data->tree, &type);
+	err = btrfs_find_path(data, name, &key_in, &data->tree, &type);
 	if (err) {
 		btrfs_unmount(data);
 		return err;
@@ -1969,14 +1847,14 @@ static int btrfs_open(struct file *file, const char *name)
 	return err;
 }
 
-static int btrfs_close(struct file file)
+static int btrfs_close(struct btrfs_file *file)
 {
 	btrfs_unmount(file->data);
 
 	return 0;
 }
 
-static ssize_t btrfs_read(struct file *file, char *buf, size_t len)
+static ssize_t btrfs_read(struct btrfs_file *file, char *buf, size_t len)
 {
 	struct btrfs_data *data = file->data;
 
@@ -1984,13 +1862,13 @@ static ssize_t btrfs_read(struct file *file, char *buf, size_t len)
 				 buf, len);
 }
 
-static int btrfs_uuid(struct device device, char **uuid)
+static int btrfs_uuid(struct device *dev, char **uuid)
 {
 	struct btrfs_data *data;
 
 	*uuid = NULL;
 
-	data = btrfs_mount(device);
+	data = btrfs_mount(dev);
 	if (!data)
 		return errno;
 
@@ -2009,13 +1887,13 @@ static int btrfs_uuid(struct device device, char **uuid)
 	return errno;
 }
 
-static int btrfs_label(struct device device, char **label)
+static int btrfs_label(struct device *dev, char **label)
 {
 	struct btrfs_data *data;
 
 	*label = NULL;
 
-	data = btrfs_mount(device);
+	data = btrfs_mount(dev);
 	if (!data)
 		return errno;
 

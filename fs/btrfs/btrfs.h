@@ -106,7 +106,7 @@ struct btrfs_header {
 } __packed;
 
 struct btrfs_device_desc {
-	struct device dev;
+	struct device *dev;
 	uint64_t id;
 };
 
@@ -230,7 +230,33 @@ struct btrfs_extent_data {
 #define BTRFS_OBJECT_ID_CHUNK 0x100
 
 
+static inline ssize_t btrfs_zstd_decompress(char *ibuf, size_t isize, off_t off,
+				     char *obuf, size_t osize) {
+	return 0;
+}
 
+static inline ssize_t btrfs_lzo_decompress(char *ibuf, size_t isize, off_t off,
+				    char *obuf, size_t osize) {
+	return 0;
+}
 
+static inline ssize_t zlib_decompress(char *ibuf, size_t isize, off_t off,
+				    char *obuf, size_t osize) {
+	return 0;
+}
+
+struct dirhook_info
+{
+  unsigned dir:1;
+  unsigned mtimeset:1;
+  unsigned case_insensitive:1;
+  unsigned inodeset:1;
+  int64_t mtime;
+  uint64_t inode;
+};
+
+typedef int (*fs_dir_hook_t) (const char *filename,
+				   const struct dirhook_info *info,
+				   void *data);
 
 #endif

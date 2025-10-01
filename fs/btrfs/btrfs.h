@@ -259,4 +259,11 @@ typedef int (*fs_dir_hook_t) (const char *filename,
 				   const struct dirhook_info *info,
 				   void *data);
 
+
+struct btrfs_filesystem {
+	struct device *dev;
+	struct cdev *cdev;
+	
+};
+
 #endif

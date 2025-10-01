@@ -1040,7 +1040,7 @@ chunk_found : {
 	return 0;
 }
 
-static struct btrfs_data *btrfs_mount(struct device *dev)
+static struct btrfs_data *btrfs_mount(struct btrfs_filesystem *fsdev)
 {
 	struct btrfs_data *data;
 	int err;

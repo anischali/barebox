@@ -48,21 +48,8 @@
 #include <linux/overflow.h>
 #include <asm/byteorder.h>
 #include <errno.h>
+#include <linux/types.h>
 #include "btrfs.h"
-
-struct ext_filesystem {
-	/* Inode size of partition */
-	uint32_t inodesz;
-	/* Group Descriptor size */
-	uint16_t gdsize;
-
-	/* Block Device Descriptor */
-	struct cdev *cdev;
-
-	struct ext2_data *data;
-
-	struct device *dev;
-};
 
 struct btrfs_disk {
 	struct cdev *cdev;
@@ -74,11 +61,15 @@ struct btrfs_file {
 	size_t size;
 	off_t offset;
 	struct btrfs_data *data;
-}
+};
 
 #define dev_to_disk(dev) NULL
 #define crypto_xor(res, src, buf, size)
-#define device_open(dev)sssssssssssssssssssssssssssssssssssssssssssssssssssssss
+#define device_open(dev) NULL
+#define device_close(dev)
+#define disk_read(disk, addr, sectors, csize, buf) 0
+#define device_iterate(callback, ctx) 
+
 
 static phys_addr_t superblock_sectors[] = { 64 * 2, 64 * 1024 * 2,
 					    256 * 1048576 * 2,
@@ -88,8 +79,7 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 				void *buf, size_t size, int recursion_depth);
 
 
-uint64_t
-divmod64 (uint64_t n, uint64_t d, uint64_t *r)
+static uint64_t divmod64 (uint64_t n, uint64_t d, uint64_t *r)
 {
   /* This algorithm is typically implemented by hardware. The idea
      is to get the highest bit in N, 64 times, by keeping
@@ -103,7 +93,7 @@ divmod64 (uint64_t n, uint64_t d, uint64_t *r)
      Using that code would just make us use software division routines, calling
      ourselves indirectly and hence getting infinite recursion.
   */
-#if !DIVISION_IN_SOFTWARE
+#if !defined(DIVISION_IN_SOFTWARE) || !DIVISION_IN_SOFTWARE
   /* Skip the slow computation if 32-bit arithmetic is possible.  */
   if (n < 0xffffffff && d < 0xffffffff)
     {
@@ -311,7 +301,7 @@ static int lower_bound(struct btrfs_data *data,
 
 
 	pr_info(
-		"retrieving %08x %x %08x\n",
+		"retrieving %llx %x %llx\n",
 		key_in->object_id, key_in->type, key_in->offset);
 
 	while (1) {
@@ -339,7 +329,7 @@ reiter:
 				if (err)
 					return err;
 
-				pr_info("internal node (depth %d) %08x %x %08x\n",
+				pr_info("internal node (depth %d) %llx %x %llx\n",
 					depth, node.key.object_id,
 					node.key.type, node.key.offset);
 
@@ -395,7 +385,7 @@ reiter:
 					return err;
 
 				pr_info(
-					"leaf (depth %d) %08x %x %08x\n",
+					"leaf (depth %d) %llx %x %llx\n",
 					depth, leaf.key.object_id,
 					leaf.key.type, leaf.key.offset);
 
@@ -445,17 +435,17 @@ reiter:
 	}
 }
 
-/* Context for find_device.  */
-struct find_device_ctx {
+/* Context for btrfs_find_device.  */
+struct btrfs_find_device_ctx {
 	struct btrfs_data *data;
 	uint64_t id;
 	struct device *dev_found;
 };
 
-/* Helper for find_device.  */
-static int find_device_iter(const char *name, void *data)
+/* Helper for btrfs_find_device.  */
+static int __maybe_unused btrfs_find_device_iter(const char *name, void *data)
 {
-	struct find_device_ctx *ctx = data;
+	struct btrfs_find_device_ctx *ctx = data;
 	struct device *dev;
 	int err;
 	struct btrfs_superblock sb;
@@ -476,7 +466,7 @@ static int find_device_iter(const char *name, void *data)
 	}
 	if (err) {
 		device_close(dev);
-		print_error();
+		pr_err("Failed to read sblock with %d\n", err);
 		return 0;
 	}
 	if (memcmp(ctx->data->sblock.uuid, sb.uuid, sizeof(sb.uuid)) != 0 ||
@@ -489,9 +479,9 @@ static int find_device_iter(const char *name, void *data)
 	return 1;
 }
 
-static struct device *find_device(struct btrfs_data *data, uint64_t id)
+static struct device *btrfs_find_device(struct btrfs_data *data, uint64_t id)
 {
-	struct find_device_ctx ctx = { .data = data,
+	struct btrfs_find_device_ctx ctx = { .data = data,
 				       .id = id,
 				       .dev_found = NULL };
 	unsigned i;
@@ -500,7 +490,7 @@ static struct device *find_device(struct btrfs_data *data, uint64_t id)
 		if (id == data->devices_attached[i].id)
 			return data->devices_attached[i].dev;
 
-	device_iterate(find_device_iter, &ctx);
+	device_iterate(btrfs_find_device_iter, &ctx);
 
 	data->n_devices_attached++;
 	if (data->n_devices_attached > data->n_devices_allocated) {
@@ -549,10 +539,10 @@ static int btrfs_read_from_chunk(struct btrfs_data *data,
 
 	paddr = le64_to_cpu(stripe->offset) + stripe_offset;
 
-	pr_info("stripe %08x maps to 0x%08x reading paddr 0x%08x\n",
+	pr_info("stripe %llx maps to 0x%llx reading paddr 0x%llx\n",
 		stripen, stripe->offset, paddr);
 
-	dev = find_device(data, stripe->device_id);
+	dev = btrfs_find_device(data, stripe->device_id);
 	if (!dev) {
 		pr_info( "couldn't find a necessary member device "
 				 "of multi-device filesystem\n");
@@ -584,7 +574,7 @@ static void rebuild_raid5(char *dest, struct raid56_buffer *buffers,
 		return;
 	}
 
-	pr_info( "rebuilding RAID 5 stripe #%08x\n", i);
+	pr_info( "rebuilding RAID 5 stripe #%llx\n", i);
 
 	for (i = 0, first = 1; i < nstripes; i++) {
 		if (!buffers[i].data_is_valid)
@@ -598,7 +588,7 @@ static void rebuild_raid5(char *dest, struct raid56_buffer *buffers,
 	}
 }
 
-static int raid6_recover_read_buffer(void *data, int disk_nr,
+static int __maybe_unused raid6_recover_read_buffer(void *data, int disk_nr,
 				       uint64_t addr __attribute__((unused)),
 				       void *dest, size_t size)
 {
@@ -653,12 +643,12 @@ static int raid56_read_retry(struct btrfs_data *data,
 		stripe = (struct btrfs_chunk_stripe *)(chunk + 1) + i;
 
 		paddr = le64_to_cpu(stripe->offset) + stripe_offset;
-		pr_info("reading paddr %08x from stripe ID %08x\n", 
+		pr_info("reading paddr %llx from stripe ID %llx\n", 
 			paddr, stripe->device_id);
 
-		dev = find_device(data, stripe->device_id);
+		dev = btrfs_find_device(data, stripe->device_id);
 		if (!dev) {
-			pr_info("stripe %u FAILED (dev ID %08x)\n", i, stripe->device_id);
+			pr_info("stripe %llu FAILED (dev ID %llx)\n", i, stripe->device_id);
 			failed_devices++;
 			continue;
 		}
@@ -668,27 +658,27 @@ static int raid56_read_retry(struct btrfs_data *data,
 				buffers[i].buf);
 		if (err == 0) {
 			buffers[i].data_is_valid = 1;
-			pr_info("stripe %u OK (dev ID %08x)\n", i, stripe->device_id);
+			pr_info("stripe %llu OK (dev ID %llx)\n", i, stripe->device_id);
 		} else {
-			pr_info("stripe %u READ FAILED (dev ID %08x)\n",
+			pr_info("stripe %llu READ FAILED (dev ID %llx)\n",
 						i, stripe->device_id);
 			failed_devices++;
 		}
 	}
 
 	if (failed_devices > 1 && (chunk_type & BTRFS_CHUNK_TYPE_RAID5)) {
-		pr_info("not enough disks for RAID 5: total %u, missing %u\n",
+		pr_info("not enough disks for RAID 5: total %llu, missing %llu\n",
 				nstripes, failed_devices);
 		ret = -EINVAL;
 		goto cleanup;
 	} else if (failed_devices > 2 &&
 		   (chunk_type & BTRFS_CHUNK_TYPE_RAID6)) {
-		pr_info("not enough disks for RAID 6: total %u, missing %u\n",
+		pr_info("not enough disks for RAID 6: total %llu, missing %llu\n",
 				nstripes, failed_devices);
 		ret = -EINVAL;
 		goto cleanup;
 	} else
-		pr_info("enough disks for RAID 5: total %u, missing %u\n",
+		pr_info("enough disks for RAID 5: total %llu, missing %llu\n",
 			nstripes, failed_devices);
 
 	/* We have enough disks. So, rebuild the data. */
@@ -723,7 +713,7 @@ static int btrfs_read_logical(struct btrfs_data *data, phys_addr_t addr,
 		size_t chsize;
 		phys_addr_t chaddr;
 
-		pr_info( "searching for laddr %08x\n",
+		pr_info( "searching for laddr %llx\n",
 			addr);
 		for (ptr = data->sblock.bootstrap_mapping;
 		     ptr < data->sblock.bootstrap_mapping +
@@ -805,7 +795,7 @@ chunk_found : {
 
 	nstripes = le16_to_cpu(chunk->nstripes) ?: 1;
 	chunk_stripe_length = le64_to_cpu(chunk->stripe_length) ?: 512;
-	pr_info("chunk 0x%08x+0x%08x, (%d stripes (%d substripes) of %08x)\n",
+	pr_info("chunk 0x%llx+0x%llx, (%d stripes (%d substripes) of %llx)\n",
 		le64_to_cpu(key->offset), le64_to_cpu(chunk->size), nstripes,
 		le16_to_cpu(chunk->nsubstripes), chunk_stripe_length);
 
@@ -819,7 +809,7 @@ chunk_found : {
 
 		/* For single, there should be exactly 1 stripe. */
 		if (le16_to_cpu(chunk->nstripes) != 1) {
-			pr_err("invalid RAID_SINGLE: nstripes != 1 (%u)",
+			pr_err("invalid RAID_SINGLE: nstripes != 1 (%d)",
 				     le16_to_cpu(chunk->nstripes));
 			return -EBADR;
 		}
@@ -847,7 +837,7 @@ chunk_found : {
 	      * should be exactly 2 sub-stripes.
 	      */
 		if (le16_to_cpu(chunk->nstripes) != redundancy) {
-			pr_err("invalid RAID1: nstripes != %u (%u)",
+			pr_err("invalid RAID1: nstripes != %u (%d)",
 				     redundancy, le16_to_cpu(chunk->nstripes));
 			return -EBADR;
 		}
@@ -882,7 +872,7 @@ chunk_found : {
 	       * should be exactly 2 sub-stripes.
 	       */
 		if (le16_to_cpu(chunk->nsubstripes) != 2) {
-			pr_err("invalid RAID10: nsubstripes != 2 (%u)",
+			pr_err("invalid RAID10: nsubstripes != 2 (%d)",
 				     le16_to_cpu(chunk->nsubstripes));
 			return -EBADR;
 		}
@@ -970,7 +960,7 @@ chunk_found : {
 		break;
 	}
 	default:
-		pr_info("unsupported RAID flags %08x", le64_to_cpu(chunk->type));
+		pr_info("unsupported RAID flags %llx", le64_to_cpu(chunk->type));
 		return -EOPNOTSUPP;
 	}
 	if (csize == 0) {
@@ -991,12 +981,12 @@ chunk_found : {
 	for (j = 0; j < 2; j++) {
 		size_t est_chunk_alloc = 0;
 
-		pr_info("chunk 0x%08x+0x%08x %d stripes (%d substripes) of %08x\n",
+		pr_info("chunk 0x%llx+0x%llx %d stripes (%d substripes) of %llx\n",
 			le64_to_cpu(key->offset), le64_to_cpu(chunk->size),
 			le16_to_cpu(chunk->nstripes),
 			le16_to_cpu(chunk->nsubstripes),
 			le64_to_cpu(chunk->stripe_length));
-		pr_info( "reading laddr 0x%08x\n",
+		pr_info( "reading laddr 0x%llx\n",
 			addr);
 
 		if (check_mul_overflow(sizeof(struct btrfs_chunk_stripe),
@@ -1185,7 +1175,7 @@ static ssize_t btrfs_extent_read(struct btrfs_data *data, uint64_t ino,
 					le64_to_cpu(data->extent->filled);
 
 			pr_info(
-				"regular extent 0x%08x + 0x%08x\n",
+				"regular extent 0x%llu + 0x%llu\n",
 				le64_to_cpu(key_out.offset),
 				le64_to_cpu(data->extent->size));
 			/*
@@ -1682,7 +1672,7 @@ static int btrfs_find_path(struct btrfs_data *data, const char *path,
 	return 0;
 }
 
-static int btrfs_dir(struct device *dev, const char *path, fs_dir_hook_t hook,
+static int __maybe_unused btrfs_dir(struct device *dev, const char *path, fs_dir_hook_t hook,
 		       void *hook_data)
 {
 	struct btrfs_data *data = btrfs_mount(dev);
@@ -1813,7 +1803,7 @@ out:
 	return -r;
 }
 
-static int btrfs_open(struct btrfs_file *file, const char *name)
+static int __maybe_unused btrfs_open(struct btrfs_file *file, const char *name)
 {
 	struct btrfs_data *data = btrfs_mount(file->dev);
 	int err;
@@ -1847,14 +1837,14 @@ static int btrfs_open(struct btrfs_file *file, const char *name)
 	return err;
 }
 
-static int btrfs_close(struct btrfs_file *file)
+static int __maybe_unused btrfs_close(struct btrfs_file *file)
 {
 	btrfs_unmount(file->data);
 
 	return 0;
 }
 
-static ssize_t btrfs_read(struct btrfs_file *file, char *buf, size_t len)
+static ssize_t __maybe_unused btrfs_read(struct btrfs_file *file, char *buf, size_t len)
 {
 	struct btrfs_data *data = file->data;
 
@@ -1862,7 +1852,7 @@ static ssize_t btrfs_read(struct btrfs_file *file, char *buf, size_t len)
 				 buf, len);
 }
 
-static int btrfs_uuid(struct device *dev, char **uuid)
+static int __maybe_unused btrfs_uuid(struct device *dev, char **uuid)
 {
 	struct btrfs_data *data;
 
@@ -1887,7 +1877,7 @@ static int btrfs_uuid(struct device *dev, char **uuid)
 	return errno;
 }
 
-static int btrfs_label(struct device *dev, char **label)
+static int __maybe_unused btrfs_label(struct device *dev, char **label)
 {
 	struct btrfs_data *data;
 

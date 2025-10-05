@@ -95,7 +95,7 @@ int efi_initrd_register(void *initrd, size_t initrd_sz)
 
 	efiret = BS->install_multiple_protocol_interfaces(
 		&lf2_handle, &efi_load_file2_protocol_guid, &efi_lf2_p,
-		&efi_device_path_protocol_guid, &initrd_dev_path, NULL);
+		&efi_device_path_protocol_guid, &initrd_dev, NULL);
 	if (EFI_ERROR(efiret)) {
 		pr_err("Failed to install protocols for INITRD %s\n",
 		       efi_strerror(efiret));

@@ -48,7 +48,7 @@
  * Param#3 is currently unused and reserved for evolution of the API.
  */
 
-enum pkcs11_ta_cmd {
+enum optee_pkcs11_ta_cmd {
 	/*
 	 * PKCS11_CMD_PING		Ack TA presence and return version info
 	 *
@@ -801,7 +801,7 @@ enum pkcs11_rc {
 #define PKCS11_SLOT_MANUFACTURER_SIZE		32
 #define PKCS11_SLOT_VERSION_SIZE		2
 
-struct pkcs11_slot_info {
+struct optee_pkcs11_slot_info {
 	u8 slot_description[PKCS11_SLOT_DESC_SIZE];
 	u8 manufacturer_id[PKCS11_SLOT_MANUFACTURER_SIZE];
 	u32 flags;

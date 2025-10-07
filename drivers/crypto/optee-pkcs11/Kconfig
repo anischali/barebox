@@ -1,0 +1,7 @@
+config OPTEE_PKCS11
+    bool "OPTEE pkcs11 driver"
+    depends on TEE
+    select CRYPTO_PKCS11
+    help
+        Support for PKCS11 crypto engine to perform encryption operations, it wi
+        provide a basic crypto ops for the supported algos.

@@ -40,13 +40,6 @@ config OPTEE_AVB_PERSISTENT_VALUES
 	  pairs. AVB itself is not implemented in barebox, but enabling this option
 	  allows barebox to use the AVB persistent value store.
 
-config OPTEE_PKCS11
-	bool "PKCS11 crypto engine ta"
-	depends on OPTEE
-	help
-	  Support for PKCS11 crypto engine to perform encryption operations, it will
-	  provide a basic crypto ops for the supported algos.
-
 endif
 
 config OF_FIXUP_OPTEE

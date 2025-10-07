@@ -20,6 +20,7 @@ obj-$(CONFIG_CRYPTO_RSA)	+= rsa.o
 obj-$(CONFIG_CRYPTO_BUILTIN_KEYS)      += public-keys.o
 obj-$(CONFIG_CRYPTO_ECC)	+= ecc.o
 obj-$(CONFIG_CRYPTO_ECDSA) 	+= ecdsa.o
+obj-$(CONFIG_CRYPTO_PKCS11) += pkcs11.o
 
 
 extra-$(CONFIG_CRYPTO_BUILTIN_KEYS) += public-keys.h

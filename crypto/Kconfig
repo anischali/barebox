@@ -115,6 +115,9 @@ config CRYPTO_PBKDF2
 	select DIGEST_HMAC_GENERIC
 	bool
 
+config CRYPTO_PKCS11
+	bool
+
 config CRYPTO_ECC
 	bool
 

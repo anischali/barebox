@@ -8,4 +8,3 @@ optee-objs += device.o
 optee-objs += smc_abi.o
 obj-$(CONFIG_MCI_MMC_RPMB) += rpmb.o
 obj-$(CONFIG_OPTEE_AVB_PERSISTENT_VALUES) += avb.o
-obj-$(CONFIG_OPTEE_PKCS11) += pkcs11.o

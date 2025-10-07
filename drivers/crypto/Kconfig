@@ -4,5 +4,6 @@ menu "Hardware crypto devices"
 
 source "drivers/crypto/caam/Kconfig"
 source "drivers/crypto/imx-scc/Kconfig"
+source "drivers/crypto/optee-pkcs11/Kconfig"
 
 endmenu

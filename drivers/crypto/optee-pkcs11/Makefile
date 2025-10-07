@@ -1,0 +1,1 @@
+obj-$(CONFIG_OPTEE_PKCS11) += pkcs11.o

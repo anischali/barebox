@@ -175,7 +175,8 @@ static int rpi_mem_init(void)
 	if (!of_machine_is_compatible("brcm,bcm2837") &&
 	    !of_machine_is_compatible("brcm,bcm2835") &&
 	    !of_machine_is_compatible("brcm,bcm2711") &&
-	    !of_machine_is_compatible("brcm,bcm2836"))
+	    !of_machine_is_compatible("brcm,bcm2836") &&
+		!of_machine_is_compatible("brcm,bcm2712"))
 		return 0;
 
 	size = rpi_get_arm_mem();
@@ -732,6 +733,24 @@ static const struct rpi_machine_data rpi_4_ids[] = {
 	},
 };
 
+static const struct rpi_machine_data rpi_5_ids[] = {
+	{
+		.hw_id = BCM2712_BOARD_REV_5,
+		.init = rpi_eth_init,
+	}, {
+		.hw_id = BCM2712_BOARD_REV_CM5,
+		.init = rpi_eth_init,
+	}, {
+		.hw_id = BCM2712_BOARD_REV_500_PLUS,
+		.init = rpi_eth_init,
+	}, {
+		.hw_id = BCM2712_BOARD_REV_CM5_LITE,
+		.init = rpi_eth_init,
+	}, {
+		.hw_id = U8_MAX
+	},
+};
+
 static const struct of_device_id rpi_of_match[] = {
 	/* BCM2835 based Boards */
 	{ .compatible = "raspberrypi,model-a", .data = rpi_1_ids },
@@ -761,6 +780,9 @@ static const struct of_device_id rpi_of_match[] = {
 	{ .compatible = "raspberrypi,4-compute-module", .data = rpi_4_ids },
 	{ .compatible = "raspberrypi,4-compute-module-s", .data = rpi_4_ids },
 	{ .compatible = "raspberrypi,400", .data = rpi_4_ids },
+
+	/* BCM2712 based Boards */
+	{ .compatible = "raspberrypi,5-model-b", .data = rpi_5_ids },
 
 	{ /* sentinel */ },
 };

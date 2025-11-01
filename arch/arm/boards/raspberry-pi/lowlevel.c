@@ -74,6 +74,7 @@ extern char __dtb_z_bcm2711_rpi_4_start[];
 extern char __dtb_z_bcm2711_rpi_400_start[];
 extern char __dtb_z_bcm2711_rpi_cm4_io_start[];
 extern char __dtb_z_bcm2711_rpi_cm4s_io_start[];
+extern char __dtb_z_bcm2712_rpi_5_b_start[];
 
 RPI_ENTRY_FUNCTION(start_raspberry_pi1, SZ_128M, fdt)
 {
@@ -101,6 +102,13 @@ RPI_ENTRY_FUNCTION(start_raspberry_pi_cm3, SZ_512M, fdt)
 	arm_cpu_lowlevel_init();
 
 	start_raspberry_pi(SZ_512M, __dtb_z_bcm2837_rpi_cm3_start, (void *)fdt);
+}
+
+RPI_ENTRY_FUNCTION(start_raspberry_pi5, SZ_512M, fdt)
+{
+	arm_cpu_lowlevel_init();
+
+	start_raspberry_pi(SZ_512M, __dtb_z_bcm2712_rpi_5_b_start, (void *)fdt);
 }
 
 #define DT_IF_ENABLED(dt, cfg) \
@@ -142,6 +150,15 @@ static void *rpi_get_board_fdt(int rev)
 		return DT_IF_ENABLED(__dtb_z_bcm2711_rpi_cm4_io_start, CONFIG_MACH_RPI4);
 	case BCM2711_BOARD_REV_CM4_S:
 		return DT_IF_ENABLED(__dtb_z_bcm2711_rpi_cm4s_io_start, CONFIG_MACH_RPI4);
+
+	case BCM2712_BOARD_REV_5:
+		return DT_IF_ENABLED(__dtb_z_bcm2712_rpi_5_b_start, CONFIG_MACH_RPI5);
+	case BCM2712_BOARD_REV_CM5:
+		return DT_IF_ENABLED(__dtb_z_bcm2712_rpi_5_b_start, CONFIG_MACH_RPI5);
+	case BCM2712_BOARD_REV_500_PLUS:
+		return DT_IF_ENABLED(__dtb_z_bcm2712_rpi_5_b_start, CONFIG_MACH_RPI5);
+	case BCM2712_BOARD_REV_CM5_LITE:
+		return DT_IF_ENABLED(__dtb_z_bcm2712_rpi_5_b_start, CONFIG_MACH_RPI5);
 	}
 
 	return NULL;

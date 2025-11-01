@@ -25,6 +25,10 @@ image-$(CONFIG_MACH_RPI_CM3) += barebox-raspberry-pi-cm3.img
 
 endif
 
+pblb-$(CONFIG_MACH_RPI5) += start_raspberry_pi5
+FILE_barebox-raspberry-pi-5.img = start_raspberry_pi5.pblb
+image-$(CONFIG_MACH_RPI5) += barebox-raspberry-pi-5.img
+
 pblb-$(CONFIG_MACH_RPI_COMMON) += start_raspberry_pi_generic
 FILE_barebox-raspberry-pi.img = start_raspberry_pi_generic.pblb
 image-$(CONFIG_MACH_RPI_COMMON) += barebox-raspberry-pi.img

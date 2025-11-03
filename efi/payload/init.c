@@ -376,56 +376,6 @@ static int efi_postcore_init(void)
 }
 postcore_efi_initcall(efi_postcore_init);
 
-static int efi_late_init(void)
-{
-	const char *state_desc = "/boot/EFI/barebox/state.dtb";
-	struct device_node *state_root = NULL;
-	size_t size;
-	void *fdt;
-	int ret;
-
-	if (!IS_ENABLED(CONFIG_STATE))
-		return 0;
-
-	if (!get_mounted_path("/boot")) {
-		pr_warn("boot device couldn't be determined%s\n",
-			IS_ENABLED(CONFIG_FS_EFI) ? "" : " without CONFIG_FS_EFI");
-		return 0;
-	}
-
-	fdt = read_file(state_desc, &size);
-	if (!fdt) {
-		pr_info("unable to read %s: %m\n", state_desc);
-		return 0;
-	}
-
-	state_root = of_unflatten_dtb(fdt, size);
-	if (!IS_ERR(state_root)) {
-		struct device_node *np = NULL;
-		struct state *state;
-
-		ret = barebox_register_of(state_root);
-		if (ret)
-			pr_warn("Failed to register device-tree: %pe\n", ERR_PTR(ret));
-
-		np = of_find_node_by_alias(state_root, "state");
-
-		state = state_new_from_node(np, false);
-		if (IS_ERR(state))
-			return PTR_ERR(state);
-
-		ret = state_load(state);
-		if (ret != -ENOMEDIUM)
-			pr_warn("Failed to load persistent state, continuing with defaults, %d\n",
-				ret);
-
-		return 0;
-	}
-
-	return 0;
-}
-late_efi_initcall(efi_late_init);
-
 static int do_efiexit(int argc, char *argv[])
 {
 	if (!BS)

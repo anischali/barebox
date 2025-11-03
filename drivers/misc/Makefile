@@ -6,6 +6,7 @@
 obj-$(CONFIG_JTAG)		+= jtag.o
 obj-$(CONFIG_SRAM)		+= sram.o
 obj-$(CONFIG_STATE_DRV)		+= state.o
+obj-$(CONFIG_EXTERNAL_STATE) += external_state.o
 obj-$(CONFIG_DEV_MEM)		+= mem.o
 obj-$(CONFIG_DEV_PORT)		+= port.o
 obj-$(CONFIG_UBOOTVAR)		+= ubootvar.o

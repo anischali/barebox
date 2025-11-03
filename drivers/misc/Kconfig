@@ -21,6 +21,19 @@ config STATE_DRV
 	depends on OFDEVICE
 	depends on STATE
 
+config EXTERNAL_STATE
+	tristate "Use external barebox state dtb"
+	depends on OFDEVICE
+	depends on STATE
+	help
+	  This permits the use of an extranl dtb state blob
+	  which permits to dynamicly at compile time specify
+	  an external blob vi EXTERNAL_STATE_DTB_PATH
+
+config EXTERNAL_STATE_DTB_PATH
+	string "the external barebox state dtb path"
+	depends on EXTERNAL_STATE
+
 config DEV_MEM
         bool "Generic memory I/O device (/dev/mem)"
 

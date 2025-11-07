@@ -391,6 +391,16 @@ static bool entry_is_match_machine_id(struct blspec_entry *entry)
 	return ret;
 }
 
+static char *get_prefix_path(const char *configname) {
+	const char *p;
+
+	p = strstr(configname, "/loader/entries/");
+	if (p && p - configname > 0)
+		return xstrndup(configname, p - configname);
+
+	return NULL;
+}
+
 static int __blspec_scan_file(struct bootentries *bootentries, const char *root,
 			      const char *configname)
 {
@@ -404,7 +414,7 @@ static int __blspec_scan_file(struct bootentries *bootentries, const char *root,
 	if (IS_ERR(entry))
 		return PTR_ERR(entry);
 
-	root = root ?: get_mounted_path(configname);
+	root = root ? : get_prefix_path(configname);
 	entry->rootpath = xstrdup_const(root);
 	entry->configpath = xstrdup_const(configname);
 	entry->cdev = get_cdev_by_mountpath(root);

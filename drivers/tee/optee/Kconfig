@@ -40,6 +40,15 @@ config OPTEE_AVB_PERSISTENT_VALUES
 	  pairs. AVB itself is not implemented in barebox, but enabling this option
 	  allows barebox to use the AVB persistent value store.
 
+config OPTEE_TRUSTED_KEYS
+	bool "OPTEE Trusted Keys Support"
+	depends on OPTEE
+	help
+	  Enables support for managing cryptographic keys using OP-TEE.
+	  Keys are securely sealed (encrypted) inside OP-TEE and can only be
+	  unsealed (decrypted) within the same trusted environment, providing
+	  hardware-backed protection for key material.
+
 endif
 
 config OF_FIXUP_OPTEE

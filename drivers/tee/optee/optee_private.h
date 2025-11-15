@@ -178,7 +178,7 @@ static inline void reg_pair_from_64(u32 *reg0, u32 *reg1, u64 val)
 
 /* Registration of the ABIs */
 int optee_smc_abi_register(void);
-
+void optee_suppl_cmd_reefs(struct tee_context *ctx, struct optee_msg_arg *arg);
 #ifdef CONFIG_MCI_MMC_RPMB
 void optee_suppl_cmd_rpmb(struct tee_context *ctx, struct optee_msg_arg *arg);
 #else

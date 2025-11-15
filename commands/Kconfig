@@ -2347,6 +2347,16 @@ config CMD_AVB_PVALUE
 	  that must be tamper evident and allows AVB to store arbitrary key-value
 	  pairs.
 
+config CMD_TRUSTED_KEYS
+	depends on OPTEE_TRUSTED_KEYS
+	tristate
+	prompt "tk"
+	help
+	  The tk command provides access to the optee trusted keys.
+
+	  TK or Trusted Keys is used to generate a random key bytes and
+	  or seal a key to a blob or unseal a blob to get back a key.
+
 config CMD_BLOBGEN
 	bool
 	select BLOBGEN

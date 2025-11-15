@@ -19,6 +19,113 @@
 #define OPTEE_RPC_CMD_RPMB		1
 
 /*
+ * File system access, see definition of protocol below
+ */
+#define OPTEE_RPC_CMD_FS		2
+
+/*
+ * Open a file
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_OPEN
+ * [in]     memref[1]	    A string holding the file name
+ * [out]    value[2].a	    File descriptor of open file
+ */
+#define OPTEE_RPC_FS_OPEN		U(0)
+
+/*
+ * Create a file
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_CREATE
+ * [in]     memref[1]	    A string holding the file name
+ * [out]    value[2].a	    File descriptor of open file
+ */
+#define OPTEE_RPC_FS_CREATE		U(1)
+
+/*
+ * Close a file
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_CLOSE
+ * [in]     value[0].b	    File descriptor of open file.
+ */
+#define OPTEE_RPC_FS_CLOSE		U(2)
+
+/*
+ * Read from a file
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_READ
+ * [in]     value[0].b	    File descriptor of open file
+ * [in]     value[0].c	    Offset into file
+ * [out]    memref[1]	    Buffer to hold returned data
+ */
+#define OPTEE_RPC_FS_READ		U(3)
+
+/*
+ * Write to a file
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_WRITE
+ * [in]     value[0].b	    File descriptor of open file
+ * [in]     value[0].c	    Offset into file
+ * [in]     memref[1]	    Buffer holding data to be written
+ */
+#define OPTEE_RPC_FS_WRITE		U(4)
+
+/*
+ * Truncate a file
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_TRUNCATE
+ * [in]     value[0].b	    File descriptor of open file
+ * [in]     value[0].c	    Length of file.
+ */
+#define OPTEE_RPC_FS_TRUNCATE		U(5)
+
+/*
+ * Remove a file
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_REMOVE
+ * [in]     memref[1]	    A string holding the file name
+ */
+#define OPTEE_RPC_FS_REMOVE		U(6)
+
+/*
+ * Rename a file
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_RENAME
+ * [in]     value[0].b	    True if existing target should be removed
+ * [in]     memref[1]	    A string holding the old file name
+ * [in]     memref[2]	    A string holding the new file name
+ */
+#define OPTEE_RPC_FS_RENAME		U(7)
+
+/*
+ * Opens a directory for file listing
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_OPENDIR
+ * [in]     memref[1]	    A string holding the name of the directory
+ * [out]    value[2].a	    Handle to open directory
+ */
+#define OPTEE_RPC_FS_OPENDIR		U(8)
+
+/*
+ * Closes a directory handle
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_CLOSEDIR
+ * [in]     value[0].b	    Handle to open directory
+ */
+#define OPTEE_RPC_FS_CLOSEDIR		U(9)
+
+/*
+ * Read next file name of directory
+ *
+ *
+ * [in]     value[0].a	    OPTEE_RPC_FS_READDIR
+ * [in]     value[0].b	    Handle to open directory
+ * [out]    memref[1]	    A string holding the file name
+ */
+#define OPTEE_RPC_FS_READDIR		U(10)
+
+/* End of definition of protocol for command OPTEE_RPC_CMD_FS */
+
+/*
  * Get time
  *
  * Returns number of seconds and nano seconds since the Epoch,

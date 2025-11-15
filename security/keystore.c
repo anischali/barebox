@@ -10,10 +10,15 @@
 #include <linux/kernel.h>
 #include <linux/list.h>
 #include <crypto/keystore.h>
+#include <tee/tk.h>
 
 static LIST_HEAD(keystore_list);
 
 #define for_each_key(key) list_for_each_entry(key, &keystore_list, list)
+
+#if defined(KEYSTORE_USE_TEE_TK)
+#else
+#endif
 
 struct keystore_key {
 	struct list_head list;

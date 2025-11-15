@@ -66,6 +66,8 @@ void optee_rpc_cmd(struct tee_context *ctx, struct optee *optee,
 		break;
 	case OPTEE_RPC_CMD_RPMB:
 		optee_suppl_cmd_rpmb(ctx, arg);
+	case OPTEE_RPC_CMD_FS:
+		optee_suppl_cmd_reefs(ctx, arg);
 		break;
 	default:
 		pr_notice_once("optee: No supplicant or RPC handler for command 0x%x\n", arg->cmd);

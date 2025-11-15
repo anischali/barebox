@@ -6,5 +6,7 @@ optee-objs += call.o
 optee-objs += rpc.o
 optee-objs += device.o
 optee-objs += smc_abi.o
+optee-objs += reefs.o
 obj-$(CONFIG_MCI_MMC_RPMB) += rpmb.o
+obj-$(CONFIG_OPTEE_TRUSTED_KEYS) += tk.o
 obj-$(CONFIG_OPTEE_AVB_PERSISTENT_VALUES) += avb.o

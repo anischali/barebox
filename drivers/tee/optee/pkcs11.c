@@ -40,7 +40,7 @@ int pkcs11_ping(const char *name, size_t buffer_size,
 		return -ENODEV;
 
 	export_uuid(sess_arg.uuid, &pkcs11_uuid);
-	sess_arg.clnt_login = TEE_IOCTL_LOGIN_PUBLIC;
+	sess_arg.clnt_login = TEE_IOCTL_LOGIN_REE_KERNEL;
 	sess_arg.num_params = 0;
 
 	rc = tee_client_open_session(ctx, &sess_arg, NULL);

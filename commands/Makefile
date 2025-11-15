@@ -5,6 +5,7 @@ obj-$(CONFIG_CMD_BASE64)	+= base64.o
 obj-$(CONFIG_CMD_DIGEST)	+= digest.o
 obj-$(CONFIG_COMPILE_HASH)	+= hashsum.o
 obj-$(CONFIG_CMD_AVB_PVALUE)	+= avb_pvalue.o
+obj-$(CONFIG_CMD_TRUSTED_KEYS)	+= tk.o
 obj-$(CONFIG_CMD_BOOTM)		+= bootm.o
 obj-$(CONFIG_CMD_UIMAGE)	+= uimage.o
 obj-$(CONFIG_CMD_LOADB)		+= loadb.o

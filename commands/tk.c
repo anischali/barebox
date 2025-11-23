@@ -23,6 +23,8 @@ static char *to_base64(const char *in, size_t len)
     return value;
 }
 
+
+
 static int do_trusted_keys(int argc, char *argv[])
 {
 	int opt;
@@ -64,15 +66,17 @@ static int do_trusted_keys(int argc, char *argv[])
 	}
 
 	if (rnd) {
-        tk_get_random(key, rnd_key);
-		//hexdump("random key", key, rnd_key);
+        trusted_tee_get_random(key, rnd_key);
+		val64 = to_base64(key, rnd_key);
+        pr_info("Unsealed base64 %s\n", val64);
         return 0;
 	}
 
     if (seal) {
         val64 = to_base64(s_key, s_len);
         pr_info("Unsealed base64 %s\n", val64);
-        tk_seal(val64, BASE64_LENGTH(s_len) + 1, key, &len);
+        len = BASE64_LENGTH(s_len) + 1;
+        trusted_tee_seal(val64, key, &len);
         free(val64);
         memset(tmp, 0x0, 512);
         memcpy(tmp, key, len);
@@ -80,19 +84,17 @@ static int do_trusted_keys(int argc, char *argv[])
         val64 = to_base64(key, len);
         pr_info("Sealed base64 (%lu|%lu): %s\n", len, BASE64_LENGTH(len) + 1, val64);
         free(val64);
-        memset(key, 0x0, 512);
-        len = 0;
-        tk_unseal(tmp, s_len, key, &len);
-        val64 = to_base64(key, len);
-        pr_info("Unsealed base64 (%lu|%lu): %s\n", len, BASE64_LENGTH(len) + 1, val64);
-        free(val64);
         return 0;
     }
 
     if (unseal) {
-        tk_unseal(s_key, s_len, key, &len);
-        //hexdump("Sealed", s_key, s_len);
-        //hexdump("Unsealed", key, len);
+        len = decode_base64(tmp, 512, s_key);
+        tmp[len] = 0;
+        trusted_tee_unseal(tmp, key, &len);
+        pr_info("Unsealed base64 (%lu|%lu): %s\n", len, BASE64_LENGTH(len) + 1, key);
+        len = decode_base64(tmp, 512, key);
+        tmp[len] = 0;
+        pr_info("Unsealed raw %s\n", tmp);
         return 0;
     }
 

@@ -59,11 +59,8 @@ struct trusted_key_tee_private {
 
 static struct trusted_key_tee_private pvt_data;
 
-/*
- * Have the TEE seal(encrypt) the symmetric key
- */
-/*
- static int trusted_tee_seal(struct trusted_key_payload *p, char *datablob)
+static int trusted_tee_op(uint8_t *in, uint8_t *out,
+						size_t *len, unsigned int op)
 {
 	int ret;
 	struct tee_ioctl_invoke_arg inv_arg;
@@ -73,88 +70,57 @@ static struct trusted_key_tee_private pvt_data;
 	memset(&inv_arg, 0, sizeof(inv_arg));
 	memset(&param, 0, sizeof(param));
     
-    shm_buf = tee_shm_alloc_kernel_buf(tk.ctx, size);
+    shm_buf = tee_shm_alloc_kernel_buf(pvt_data.ctx, 1024);
 	if (IS_ERR(shm_buf)) {
-		pr_err(pvt_data.dev, "shm register failed\n");
-        ret = -ENOMEM;
-        return ret;
+		pr_err("shm register failed\n");
+        return -ENOMEM;
 	}
 
-	inv_arg.func = TA_CMD_SEAL;
+	memcpy(shm_buf->kaddr, in, *len);
+	inv_arg.func = op;
 	inv_arg.session = pvt_data.session_id;
-	inv_arg.num_params = 4;
+	inv_arg.num_params = 2;
 
 	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
 	param[0].u.memref.shm = shm_buf;
-	param[0].u.memref.size = size;
+	param[0].u.memref.size = *len;
 	param[0].u.memref.shm_offs = 0;
 	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_OUTPUT;
-	param[1].u.memref.shm = reg_shm;
-	param[1].u.memref.size = sizeof(p->blob);
-	param[1].u.memref.shm_offs = sizeof(p->key);
+	param[1].u.memref.shm = shm_buf;
+	param[1].u.memref.size = 512;
+	param[1].u.memref.shm_offs = 512;
 
 	ret = tee_client_invoke_func(pvt_data.ctx, &inv_arg, param);
 	if ((ret < 0) || (inv_arg.ret != 0)) {
-		dev_err(pvt_data.dev, "TA_CMD_SEAL invoke err: %x\n",
+		pr_err("TA_CMD_SEAL invoke err: %x\n",
 			inv_arg.ret);
 		ret = -EFAULT;
 	} else {
-		p->blob_len = param[1].u.memref.size;
+		*len = param[1].u.memref.size;
+		memcpy(out, shm_buf->kaddr + 512, *len);
 	}
 
-	tee_shm_free(reg_shm);
+	tee_shm_free(shm_buf);
 
 	return ret;
 }
-*/
+
+/*
+ * Have the TEE seal(encrypt) the symmetric key
+ */
+int trusted_tee_seal(uint8_t *data, uint8_t *blob, size_t *len)
+{
+	return trusted_tee_op(data, blob, len, TA_CMD_SEAL);
+}
+
 /*
  * Have the TEE unseal(decrypt) the symmetric key
  */
-/*
-static int trusted_tee_unseal(struct trusted_key_payload *p, char *datablob)
+int trusted_tee_unseal(uint8_t *blob, uint8_t *data, size_t *len)
 {
-	int ret;
-	struct tee_ioctl_invoke_arg inv_arg;
-	struct tee_param param[4];
-	struct tee_shm *reg_shm = NULL;
-
-	memset(&inv_arg, 0, sizeof(inv_arg));
-	memset(&param, 0, sizeof(param));
-
-	reg_shm = tee_shm_register_kernel_buf(pvt_data.ctx, p->key,
-					      sizeof(p->key) + sizeof(p->blob));
-	if (IS_ERR(reg_shm)) {
-		dev_err(pvt_data.dev, "shm register failed\n");
-		return PTR_ERR(reg_shm);
-	}
-
-	inv_arg.func = TA_CMD_UNSEAL;
-	inv_arg.session = pvt_data.session_id;
-	inv_arg.num_params = 4;
-
-	param[0].attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_INPUT;
-	param[0].u.memref.shm = reg_shm;
-	param[0].u.memref.size = p->blob_len;
-	param[0].u.memref.shm_offs = sizeof(p->key);
-	param[1].attr = TEE_IOCTL_PARAM_ATTR_TYPE_MEMREF_OUTPUT;
-	param[1].u.memref.shm = reg_shm;
-	param[1].u.memref.size = sizeof(p->key);
-	param[1].u.memref.shm_offs = 0;
-
-	ret = tee_client_invoke_func(pvt_data.ctx, &inv_arg, param);
-	if ((ret < 0) || (inv_arg.ret != 0)) {
-		dev_err(pvt_data.dev, "TA_CMD_UNSEAL invoke err: %x\n",
-			inv_arg.ret);
-		ret = -EFAULT;
-	} else {
-		p->key_len = param[1].u.memref.size;
-	}
-
-	tee_shm_free(reg_shm);
-
-	return ret;
+	return trusted_tee_op(blob, data, len, TA_CMD_UNSEAL);
 }
-*/
+
 /*
  * Have the TEE generate random symmetric key
  */

@@ -121,7 +121,7 @@ static void __iomem *bcm2835_mbox_probe(void)
 	struct device_node *mbox_node;
 
 	if (IN_PBL)
-		return bcm2835_get_mmio_base_by_cpuid() + 0xb880;
+		return IOMEM(0x1000000000) + 0x7c013880;
 
 	mbox_node = of_find_compatible_node(NULL, NULL, "brcm,bcm2835-mbox");
 	if (!mbox_node) {

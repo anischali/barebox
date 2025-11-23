@@ -22,6 +22,8 @@ void __iomem *bcm2835_get_mmio_base_by_cpuid(void)
 		return IOMEM(0x3f000000);
 	case CPU_IS_CORTEX_A72:	/* bcm2711 */
 		return IOMEM(0xfe000000);
+	case CPU_IS_CORTEX_A76:	/* bcm2712 */
+		return IOMEM(0x1000000000);
 	}
 
 	pr_err("Couldn't determine rpi by CPUID %08x\n", cpuid);

@@ -2349,6 +2349,7 @@ config CMD_AVB_PVALUE
 
 config CMD_TRUSTED_KEYS
 	depends on OPTEE_TRUSTED_KEYS
+	select BASE64
 	tristate
 	prompt "tk"
 	help

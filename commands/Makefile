@@ -36,6 +36,7 @@ obj-$(CONFIG_CMD_PWD)		+= pwd.o
 obj-$(CONFIG_CMD_MKDIR)		+= mkdir.o
 obj-$(CONFIG_CMD_RMDIR)		+= rmdir.o
 obj-$(CONFIG_CMD_CP)		+= cp.o
+obj-$(CONFIG_CMD_DD)		+= dd.o
 obj-$(CONFIG_CMD_RM)		+= rm.o
 obj-$(CONFIG_CMD_CAT)		+= cat.o
 obj-$(CONFIG_CMD_MOUNT)		+= mount.o

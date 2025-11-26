@@ -995,6 +995,17 @@ config CMD_CP
 		  -n    do not overwrite an existing file
 		  -v	verbose
 
+config CMD_DD
+	tristate
+	default y
+	prompt "dd"
+	help
+	  Copy binary blobs
+
+	  Usage: dd skip,count,seek if=<src> of=<dst>
+
+	  Copy binary blob from SRC to DEST.
+
 config CMD_CMP
 	tristate
 	prompt "cmp"

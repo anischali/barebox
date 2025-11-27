@@ -15,3 +15,4 @@ obj-$(CONFIG_PCI_LAYERSCAPE) += pci-layerscape.o
 obj-$(CONFIG_PCI_EFI) += pci-efi.o
 obj-$(CONFIG_PCI_ECAM_GENERIC) += pci-ecam-generic.o
 obj-$(CONFIG_PCI_ROCKCHIP) += pcie-dw-rockchip.o
+obj-$(CONFIG_PCI_BRCMSTB) += pci-brcmstb.o

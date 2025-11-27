@@ -41,6 +41,13 @@ config PCI_TEGRA
 	select OF_PCI
 	select PCI
 
+config PCI_BRCM
+	bool "Broadcom Brcmstb PCIe controller"
+	depends on ARCH_BCM283X
+	select OF_ADDRESS_PCI
+	select OF_PCI
+	select PCI
+
 config PCI_IMX6
 	bool "Freescale i.MX6/7/8 PCIe controller"
 	depends on ARCH_IMX6 || ARCH_IMX7 || ARCH_IMX8MQ

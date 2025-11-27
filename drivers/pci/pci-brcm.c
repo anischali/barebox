@@ -16,6 +16,7 @@
 #include <of_address.h>
 #include <of_pci.h>
 #include <linux/pci.h>
+#include <linux/pci-ecam.h>
 #include <linux/phy/phy.h>
 #include <linux/reset.h>
 #include <linux/sizes.h>
@@ -247,7 +248,7 @@ static inline bool is_bmips(const struct brcm_pcie *pcie)
 	return pcie->cfg->soc_base == BCM7435 || pcie->cfg->soc_base == BCM7425;
 }
 
-static inline struct brcm_pcie *host_to_pcie(struct pci_controller *host)
+static inline struct brcm_pcie *host_to_pcie(struct pci_bus *host)
 {
 	return container_of(host, struct brcm_pcie, pci);
 }
@@ -258,7 +259,7 @@ static inline struct brcm_pcie *host_to_pcie(struct pci_controller *host)
  */
 static int brcm_pcie_encode_ibar_size(u64 size)
 {
-	int log2_in = ilog2(size);
+	int log2_in = __ilog2(size);
 
 	if (log2_in >= 12 && log2_in <= 15)
 		/* Covers 4KB to 32KB (inclusive) */
@@ -291,8 +292,8 @@ static int brcm_pcie_mdio_read(void __iomem *base, u8 port, u8 regad, u32 *val)
 	writel(brcm_pcie_mdio_form_pkt(port, regad, MDIO_CMD_READ),
 		   base + PCIE_RC_DL_MDIO_ADDR);
 	readl(base + PCIE_RC_DL_MDIO_ADDR);
-	err = readl_poll_timeout_atomic(base + PCIE_RC_DL_MDIO_RD_DATA, data,
-					MDIO_RD_DONE(data), 10, 100);
+	err = readl_poll_timeout(base + PCIE_RC_DL_MDIO_RD_DATA, data,
+					MDIO_RD_DONE(data), 100);
 	*val = FIELD_GET(MDIO_DATA_MASK, data);
 
 	return err;
@@ -342,7 +343,7 @@ static int brcm_pcie_set_ssc(struct brcm_pcie *pcie)
 	if (ret < 0)
 		return ret;
 
-	usleep_range(1000, 2000);
+	usleep(2000);
 	ret = brcm_pcie_mdio_read(pcie->base, MDIO_PORT0,
 				  SSC_STATUS_OFFSET, &tmp);
 	if (ret < 0)
@@ -396,7 +397,7 @@ static void brcm_pcie_set_outbound_win(struct brcm_pcie *pcie,
 
 	/* Write the cpu & limit addr upper bits */
 	high_addr_shift =
-		HWEIGHT32(PCIE_MISC_CPU_2_PCIE_MEM_WIN0_BASE_LIMIT_BASE_MASK);
+		hweight32(PCIE_MISC_CPU_2_PCIE_MEM_WIN0_BASE_LIMIT_BASE_MASK);
 
 	cpu_addr_mb_high = cpu_addr_mb >> high_addr_shift;
 	tmp = readl(pcie->base + PCIE_MEM_WIN0_BASE_HI(win));
@@ -432,12 +433,12 @@ static bool brcm_pcie_link_up(struct brcm_pcie *pcie)
 static void __iomem *brcm_pcie_map_bus(struct pci_bus *bus,
 				       unsigned int devfn, int where)
 {
-	struct brcm_pcie *pcie = bus->sysdata;
+	struct brcm_pcie *pcie = host_to_pcie(bus);
 	void __iomem *base = pcie->base;
 	int idx;
 
 	/* Accesses to the RC go right to the RC registers if !devfn */
-	if (pci_is_root_bus(bus))
+	if (!bus->parent)
 		return devfn ? NULL : base + PCIE_ECAM_REG(where);
 
 	/* An access to our HW w/o link-up will cause a CPU Abort */
@@ -453,12 +454,12 @@ static void __iomem *brcm_pcie_map_bus(struct pci_bus *bus,
 static void __iomem *brcm7425_pcie_map_bus(struct pci_bus *bus,
 					   unsigned int devfn, int where)
 {
-	struct brcm_pcie *pcie = bus->sysdata;
+	struct brcm_pcie *pcie = host_to_pcie(bus);
 	void __iomem *base = pcie->base;
 	int idx;
 
 	/* Accesses to the RC go right to the RC registers if !devfn */
-	if (pci_is_root_bus(bus))
+	if (!bus->parent)
 		return devfn ? NULL : base + PCIE_ECAM_REG(where);
 
 	/* An access to our HW w/o link-up will cause a CPU Abort */
@@ -569,7 +570,7 @@ static int brcm_pcie_post_setup_bcm2712(struct brcm_pcie *pcie)
 			return ret;
 	}
 
-	usleep_range(100, 200);
+	usleep(100, 200);
 
 	/*
 	 * Set L1SS sub-state timers to avoid lengthy state transitions,
@@ -595,7 +596,7 @@ static void add_inbound_win(struct inbound_win *b, u8 *count, u64 size,
 static int brcm_pcie_get_inbound_wins(struct brcm_pcie *pcie,
 				      struct inbound_win inbound_wins[])
 {
-	struct pci_host_bridge *bridge = pci_host_bridge_from_priv(pcie);
+	struct pci_controller *pci = &pcie->pci;
 	u64 pci_offset, cpu_addr, size = 0, tot_size = 0;
 	struct resource_entry *entry;
 	struct device *dev = pcie->dev;
@@ -620,7 +621,7 @@ static int brcm_pcie_get_inbound_wins(struct brcm_pcie *pcie,
 	if (pcie->cfg->soc_base != BCM7712)
 		add_inbound_win(b++, &n, 0, 0, 0);
 
-	resource_list_for_each_entry(entry, &bridge->dma_ranges) {
+	resource_list_for_each_entry(entry, pci->dma_ranges) {
 		u64 pcie_start = entry->res->start - entry->offset;
 		u64 cpu_start = entry->res->start;
 
@@ -785,8 +786,7 @@ static int brcm_pcie_setup(struct brcm_pcie *pcie)
 {
 	struct inbound_win inbound_wins[PCIE_BRCM_MAX_INBOUND_WINS];
 	void __iomem *base = pcie->base;
-	struct 
-	 *pci;
+	struct pci_controller *pci;
 	struct resource_entry *entry;
 	u32 tmp, burst, aspm_support;
 	u8 num_out_wins = 0;
@@ -807,7 +807,7 @@ static int brcm_pcie_setup(struct brcm_pcie *pcie)
 		}
 	}
 
-	usleep_range(100, 200);
+	usleep(200);
 
 	/* Take the bridge out of reset */
 	ret = pcie->cfg->bridge_sw_init_set(pcie, 0);
@@ -821,7 +821,7 @@ static int brcm_pcie_setup(struct brcm_pcie *pcie)
 		tmp &= ~PCIE_MISC_HARD_PCIE_HARD_DEBUG_SERDES_IDDQ_MASK;
 	writel(tmp, base + HARD_DEBUG(pcie));
 	/* Wait for SerDes to be stable */
-	usleep_range(100, 200);
+	usleep(200);
 
 	/*
 	 * SCB_MAX_BURST_SIZE is a two bit field.  For GENERIC chips it
@@ -862,7 +862,7 @@ static int brcm_pcie_setup(struct brcm_pcie *pcie)
 
 	tmp = readl(base + PCIE_MISC_MISC_CTRL);
 	for (memc = 0; memc < pcie->num_memc; memc++) {
-		u32 scb_size_val = ilog2(pcie->memc_size[memc]) - 15;
+		u32 scb_size_val = __ilog2(pcie->memc_size[memc]) - 15;
 
 		if (memc == 0)
 			u32p_replace_bits(&tmp, scb_size_val, SCB_SIZE_MASK(0));
@@ -882,8 +882,8 @@ static int brcm_pcie_setup(struct brcm_pcie *pcie)
 			  PCIE_RC_CFG_PRIV1_ID_VAL3_CLASS_CODE_MASK);
 	writel(tmp, base + PCIE_RC_CFG_PRIV1_ID_VAL3);
     
-    pci = pcie->pci;
-	resource_list_for_each_entry(entry, &bridge->windows) {
+    pci = &pcie->pci;
+	resource_list_for_each_entry(entry, pci->windows) {
 		struct resource *res = entry->res;
 
 		if (resource_type(res) != IORESOURCE_MEM)
@@ -1011,7 +1011,6 @@ static void brcm_config_clkreq(struct brcm_pcie *pcie)
 
 static int brcm_pcie_start_link(struct brcm_pcie *pcie)
 {
-	struct device *dev = pcie->dev;
 	void __iomem *base = pcie->base;
 	u16 nlw, cls, lnksta;
 	bool ssc_good = false;
@@ -1030,7 +1029,7 @@ static int brcm_pcie_start_link(struct brcm_pcie *pcie)
 	 * Wait for 100ms after PERST# deassertion; see PCIe CEM specification
 	 * sections 2.2, PCIe r5.0, 6.6.1.
 	 */
-	msleep(100);
+	usleep(1000);
 
 	/*
 	 * Give the RC/EP even more time to wake up, before trying to
@@ -1038,7 +1037,7 @@ static int brcm_pcie_start_link(struct brcm_pcie *pcie)
 	 * total of 100ms.
 	 */
 	for (i = 0; i < 100 && !brcm_pcie_link_up(pcie); i += 5)
-		msleep(5);
+		usleep(5000);
 
 	if (!brcm_pcie_link_up(pcie)) {
 		pr_err("link down\n");
@@ -1058,8 +1057,7 @@ static int brcm_pcie_start_link(struct brcm_pcie *pcie)
 	lnksta = readw(base + BRCM_PCIE_CAP_REGS + PCI_EXP_LNKSTA);
 	cls = FIELD_GET(PCI_EXP_LNKSTA_CLS, lnksta);
 	nlw = FIELD_GET(PCI_EXP_LNKSTA_NLW, lnksta);
-	pr_info("link up, %s x%u %s\n",
-		 pci_speed_string(pcie_link_speed[cls]), nlw,
+	pr_info("link up x%u %s\n", nlw,
 		 ssc_good ? "(SSC)" : "(!SSC)");
 
 	return 0;
@@ -1078,7 +1076,7 @@ static void *alloc_subdev_regulators(struct device *dev)
 	struct subdev_regulators *sr;
 	int i;
 
-	sr = devm_kzalloc(dev, size, GFP_KERNEL);
+	sr = xzalloc(size);
 	if (sr) {
 		sr->num_supplies = ARRAY_SIZE(supplies);
 		for (i = 0; i < ARRAY_SIZE(supplies); i++)
@@ -1110,7 +1108,7 @@ static int brcm_phy_cntl(struct brcm_pcie *pcie, const int start)
 		tmp = readl(base + PCIE_DVT_PMU_PCIE_PHY_CTRL);
 		tmp = (tmp & ~masks[i]) | (val & masks[i]);
 		writel(tmp, base + PCIE_DVT_PMU_PCIE_PHY_CTRL);
-		usleep_range(50, 200);
+		usleep(200);
 		combined_mask |= masks[i];
 	}
 
@@ -1348,8 +1346,7 @@ static int brcm_pcie_probe(struct device *dev)
     const struct of_device_id *match = of_match_node(brcm_pcie_match, np);
 	const struct pcie_cfg_data *data = (struct pcie_cfg_data *)match->data;;
 	struct brcm_pcie *pcie;
-	struct 
-	 *pci;
+	struct pci_controller *pci;
     struct io_resource *iores;
 	int ret;
 
@@ -1360,10 +1357,11 @@ static int brcm_pcie_probe(struct device *dev)
 	pcie = xzalloc(sizeof(*pcie));
     if (!pcie)
         return -ENOMEM;
-
-    pci_controller_init(&pcie->pci);
-    pci = &pcie->pci;
+		
 	pcie->dev = dev;
+	pci_controller_init(&pcie->pci);
+    pci = &pcie->pci;
+    pci->parent = dev;
 	pcie->np = np;
 	pcie->cfg = data;
 
@@ -1450,7 +1448,6 @@ static int brcm_pcie_probe(struct device *dev)
 	}
 
 	pci->ops = &brcm_pcie_ops;
-	pci->sysdata = pcie;
 
 	ret = register_pci_controller(pci);
 	if (!ret && !brcm_pcie_link_up(pcie))

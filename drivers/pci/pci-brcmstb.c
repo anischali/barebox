@@ -90,7 +90,7 @@ static inline struct brcm_pcie *host_to_brcm(struct pci_controller *host)
  *
  * Return: The encoded inbound region size
  */
-static int brcm_pcie_encode_ibar_size(u64 size)
+static int __maybe_unused brcm_pcie_encode_ibar_size(u64 size)
 {
 	int log2_in = ilog2(size);
 
@@ -385,6 +385,45 @@ static const struct pci_ops brcm_pcie_ops = {
 	.write	= brcm_pcie_write_config,
 };
 
+static int brcm_pcie_setup_inbounds(struct brcm_pcie *pcie)
+{
+	struct device *dev = pcie->pci.parent;
+	struct device_node *np = dev->of_node;
+	struct of_pci_range_parser parser;
+	struct of_pci_range range;
+	struct resource res;
+    int num_out_wins = 0;
+
+	if (of_pci_range_parser_init(&parser, np)) {
+		pr_err("missing \"ranges\" property\n");
+		return -EINVAL;
+	}
+
+	for_each_of_pci_range(&parser, &range) {
+		of_pci_range_to_resource(&range, np, &res);
+
+		switch (res.flags & IORESOURCE_TYPE_BITS) {
+		case IORESOURCE_MEM:
+			if (res.flags & IORESOURCE_PREFETCH) {
+				continue;
+			} else {
+                
+                if (num_out_wins >= BRCM_NUM_PCIE_OUT_WINS)
+			        return -EINVAL;
+
+                pr_debug("inbound: %d 0x%08x : 0x%08x\n", num_out_wins, res.start, range.pci_addr);
+		        brcm_pcie_set_outbound_win(pcie, num_out_wins, res.start,
+					   SZ_128M, SZ_128M);
+
+		        num_out_wins++;
+			}
+			break;
+		}
+	}
+
+    return 0;
+}
+
 static int brcm_pcie_parse_dt(struct brcm_pcie *pcie)
 {
 	struct device *dev = pcie->pci.parent;
@@ -392,7 +431,7 @@ static int brcm_pcie_parse_dt(struct brcm_pcie *pcie)
 	struct of_pci_range_parser parser;
 	struct of_pci_range range;
 	struct resource res;
-    int max_link_speed, ret, num_out_wins = 0;
+    int max_link_speed, ret;
 
 	if (of_pci_range_parser_init(&parser, np)) {
 		pr_err("missing \"ranges\" property\n");
@@ -413,20 +452,8 @@ static int brcm_pcie_parse_dt(struct brcm_pcie *pcie)
 				memcpy(&pcie->prefetch, &res, sizeof(res));
 				pcie->prefetch.name = "PREFETCH";
 			} else {
-				/* Choose 32-bit mappings over 64-bit ones if possible */
-				//if (pcie->mem.name && !is_64bit(&pcie->mem) && is_64bit(&res))
-				//	break;
-
 				memcpy(&pcie->mem, &res, sizeof(res));
 				pcie->mem.name = "MEM";
-
-                if (num_out_wins >= BRCM_NUM_PCIE_OUT_WINS)
-			        return -EINVAL;
-
-		        brcm_pcie_set_outbound_win(pcie, num_out_wins, res.start,
-					   range.pci_addr, SZ_128M);
-
-		        num_out_wins++;
 			}
 			break;
 		}
@@ -472,6 +499,12 @@ static int brcm_pcie_probe(struct device *dev)
 
 	pci_controller_init(&pcie->pci);
 
+    ret = brcm_pcie_parse_dt(pcie);
+    if (ret) {
+        pr_err("failed to initialize brcm pcie with %d\n", ret);
+        return ret;
+    }
+
     hose = &pcie->pci;
 
 	/*
@@ -495,7 +528,7 @@ static int brcm_pcie_probe(struct device *dev)
 
 	/* Wait for SerDes to be stable */
 	udelay(100);
-
+    
 	/* Set SCB_MAX_BURST_SIZE, CFG_READ_UR_MODE, SCB_ACCESS_EN */
 	clrsetbits_le32(pcie->base + PCIE_MISC_MISC_CTRL,
 			MISC_CTRL_MAX_BURST_SIZE_MASK,
@@ -546,10 +579,10 @@ static int brcm_pcie_probe(struct device *dev)
 		return -EINVAL;
 	}
 
-    ret = brcm_pcie_parse_dt(pcie);
+    ret = brcm_pcie_setup_inbounds(pcie);
     if (ret) {
-        pr_err("failed to initialize brcm pcie with %d\n", ret);
-        return ret;
+        pr_err("PCIe Failed to setup inbounds\n");
+		return -EINVAL;
     }
 
 	/*

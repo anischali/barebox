@@ -417,8 +417,14 @@ void pcibios_bus_to_resource(struct pci_bus *bus, struct resource *res,
 /* drivers/pci/of.c */
 #ifdef CONFIG_OFDEVICE
 int of_pci_bridge_init(struct device *dev, struct pci_controller *bridge);
+int of_pci_get_max_link_speed(struct device_node *node);
 #else
 static inline int of_pci_bridge_init(struct device *dev, struct pci_controller *bridge)
+{
+	return 0;
+}
+
+int of_pci_get_max_link_speed(struct device_node *node)
 {
 	return 0;
 }

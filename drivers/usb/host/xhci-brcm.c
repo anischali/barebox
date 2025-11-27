@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * (C) Copyright 2010 Jean-Christophe PLAGNIOL-VILLARD <plagnioj@jcrosoft.com>
+ */
+
+#include <common.h>
+#include <linux/clk.h>
+#include <linux/err.h>
+#include <driver.h>
+#include <init.h>
+#include <linux/usb/usb.h>
+#include <linux/usb/usb_defs.h>
+#include <linux/usb/ehci.h>
+#include <linux/usb/phy.h>
+#include <linux/usb/of.h>
+#include <errno.h>
+#include <io.h>
+
+#include "ehci.h"
+
+#define EHCI_INSNREG(index)			((index) * 4 + 0x90)
+#define EHCI_INSNREG08_HSIC_EN			BIT(2)
+
+struct brcm_xhci_priv {
+	struct xhci_host *xhci;
+	struct device *dev;
+	struct clk *iclk;
+	struct clk *uclk;
+};
+
+
+static int brcm_xhci_probe(struct device *dev)
+{
+	int ret;
+	struct resource *iores;
+	struct ehci_data data;
+	struct brcm_xhci_priv *atehci;
+	const char *uclk_name;
+	struct ehci_host *ehci;
+
+	uclk_name = (dev->of_node) ? "usb_clk" : "uhpck";
+
+	atehci = xzalloc(sizeof(*atehci));
+	atehci->dev = dev;
+	dev->priv = atehci;
+
+	atehci->iclk = clk_get(dev, "xhci_clk");
+	if (IS_ERR(atehci->iclk)) {
+		dev_err(dev, "Error getting interface clock\n");
+		return -ENOENT;
+	}
+
+	atehci->uclk = clk_get(dev, uclk_name);
+	if (IS_ERR(atehci->iclk)) {
+		dev_err(dev, "Error getting function clock\n");
+		return -ENOENT;
+	}
+
+	/*
+	 * Start the USB clocks.
+	 */
+	ret = atmel_start_clock(atehci);
+	if (ret < 0)
+		return ret;
+
+	memset(&data, 0, sizeof(data));
+
+	iores = dev_request_mem_resource(dev, 0);
+	if (IS_ERR(iores))
+		return PTR_ERR(iores);
+	data.hccr = IOMEM(iores->start);
+
+	xhci = xhci_register(dev, &data);
+	if (IS_ERR(ehci))
+		return PTR_ERR(ehci);
+
+	atehci->ehci = ehci;
+
+	if (of_usb_get_phy_mode(dev->of_node, NULL) == USBPHY_INTERFACE_MODE_HSIC)
+		writel(EHCI_INSNREG08_HSIC_EN, data.hccr + EHCI_INSNREG(8));
+
+	return 0;
+}
+
+static void brcm_xhci_remove(struct device *dev)
+{
+	struct brcm_xhci_priv *atehci = dev->priv;
+
+	ehci_unregister(atehci->ehci);
+
+	/*
+	 * Stop the USB clocks.
+	 */
+	atmel_stop_clock(atehci);
+}
+
+static const struct of_device_id brcm_xhci_dt_ids[] = {
+	{ .compatible = "brcm,xhci-brcm-v2" },
+	{ /* sentinel */ }
+};
+MODULE_DEVICE_TABLE(of, brcm_xhci_dt_ids);
+
+static struct driver brcm_xhci_driver = {
+	.name = "brcm-xhci",
+	.probe = brcm_xhci_probe,
+	.remove = brcm_xhci_remove,
+	.of_compatible = DRV_OF_COMPAT(brcm_xhci_dt_ids),
+};
+device_platform_driver(brcm_xhci_driver);

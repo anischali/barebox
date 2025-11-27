@@ -100,3 +100,14 @@ int of_pci_bridge_init(struct device *dev, struct pci_controller *bridge)
 
 	return of_pci_get_host_bridge_resources(dev, bridge);
 }
+
+int of_pci_get_max_link_speed(struct device_node *node)
+{
+	u32 max_link_speed;
+
+	if (of_property_read_u32(node, "max-link-speed", &max_link_speed) ||
+	    max_link_speed == 0 || max_link_speed > 4)
+		return -EINVAL;
+
+	return max_link_speed;
+}

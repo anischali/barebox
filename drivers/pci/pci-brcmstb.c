@@ -142,7 +142,7 @@ static bool brcm_pcie_link_up(struct brcm_pcie *pcie)
 static void __iomem *brcm_pcie_map_bus(struct pci_bus *bus,
 				       unsigned int devfn, int offset)
 {
-struct brcm_pcie *pcie = host_to_brcm(bus->host);
+    struct brcm_pcie *pcie = host_to_brcm(bus->host);
 	void __iomem *base = pcie->base;
 	int idx;
 

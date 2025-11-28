@@ -140,25 +140,33 @@ static bool brcm_pcie_link_up(struct brcm_pcie *pcie)
 }
 
 static void __iomem *brcm_pcie_map_bus(struct pci_bus *bus,
-				       unsigned int devfn, int where)
+				       unsigned int devfn, int offset)
 {
 	struct brcm_pcie *pcie = host_to_brcm(bus->host);
-	void __iomem *base = pcie->base;
+	u8 pci_bus = bus->number;
+	u8 pci_dev = PCI_SLOT(devfn);
 	int idx;
 
-	/* Accesses to the RC go right to the RC registers if !devfn */
-	if (!bus->parent)
-		return devfn ? NULL : base + PCIE_ECAM_REG(where);
+	/*
+	 * Busses 0 (host PCIe bridge) and 1 (its immediate child)
+	 * are limited to a single device each
+	 */
+	if (pci_bus < 2 && pci_dev > 0)
+		return NULL;
+
+	/* Accesses to the RC go right to the RC registers */
+	if (pci_bus == 0)
+		return devfn ? NULL : pcie->base + offset;
 
 	/* An access to our HW w/o link-up will cause a CPU Abort */
 	if (!brcm_pcie_link_up(pcie))
 		return NULL;
 
 	/* For devices, write to the config space index register */
-	idx = PCIE_ECAM_OFFSET(bus->number, devfn, 0);
+	idx = PCIE_ECAM_OFFSET(pci_bus, devfn, offset);
 
-	writel(idx, base + 0x9000);
-	return base + 0x8000 + PCIE_ECAM_REG(where);
+	writel(idx, pcie->base + PCIE_EXT_CFG_INDEX);
+	return pcie->base + PCIE_EXT_CFG_DATA + offset;
 }
 
 
@@ -411,9 +419,8 @@ static int brcm_pcie_setup_inbounds(struct brcm_pcie *pcie)
                 if (num_out_wins >= BRCM_NUM_PCIE_OUT_WINS)
 			        return -EINVAL;
 
-                pr_debug("inbound: %d 0x%08x : 0x%08x\n", num_out_wins, res.start, range.pci_addr);
 		        brcm_pcie_set_outbound_win(pcie, num_out_wins, res.start,
-					   SZ_128M, SZ_128M);
+					   res.end, SZ_128M);
 
 		        num_out_wins++;
 			}

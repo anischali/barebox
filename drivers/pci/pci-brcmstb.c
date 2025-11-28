@@ -153,8 +153,8 @@ struct brcm_pcie *pcie = host_to_brcm(bus->host);
 		return NULL;
 
 	/* Accesses to the RC go right to the RC registers if !devfn */
-	if (!bus->parent)
-		return devfn ? NULL : base + PCIE_ECAM_REG(offset);
+	if (!bus->number)
+		return base + PCIE_ECAM_REG(offset);
 
 	/* An access to our HW w/o link-up will cause a CPU Abort */
 	if (!brcm_pcie_link_up(pcie))

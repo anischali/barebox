@@ -38,7 +38,7 @@ static int xhci_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	xhci->dev = dev;
 
-	xhci->reset = reset_control_get_optional(dev, "reset");
+	xhci->reset = reset_control_get_optional(dev->parent, "xhci-reset");
 	if (IS_ERR(xhci->reset)) {
 		ret = PTR_ERR(xhci->reset);
 		pr_err("Failed to get reset, err: %d\n", ret);
@@ -46,15 +46,9 @@ static int xhci_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	if (xhci->reset) {
-		ret = reset_control_assert(xhci->reset);
+		ret = reset_control_reset(xhci->reset);
 		if (ret) {
-			pr_err("Failed to assert reset, err: %d\n", ret);
-			return ret;
-		}
-
-		ret = reset_control_deassert(xhci->reset);
-		if (ret) {
-			pr_err("Failed to assert reset, err: %d\n", ret);
+			pr_err("Failed to reset, err: %d\n", ret);
 			return ret;
 		}
 	}

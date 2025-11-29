@@ -174,7 +174,6 @@ static int brcm_pcie_read_config(struct pci_bus *bus, unsigned int devfn,
     void __iomem *addr;
 
 	addr = brcm_pcie_map_bus(bus, devfn, where);
-	pr_info("[%d %d %d -> %x]\n", bus, devfn, where, addr);
 	if (!addr)
 		return PCIBIOS_DEVICE_NOT_FOUND;
 

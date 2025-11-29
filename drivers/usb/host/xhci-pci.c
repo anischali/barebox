@@ -38,6 +38,27 @@ static int xhci_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	xhci->dev = dev;
 
+	xhci->reset = reset_control_get_optional(dev, "reset");
+	if (IS_ERR(xhci->reset)) {
+		ret = PTR_ERR(xhci->reset);
+		pr_err("Failed to get reset, err: %d\n", ret);
+		return ret;
+	}
+
+	if (xhci->reset) {
+		ret = reset_control_assert(xhci->reset);
+		if (ret) {
+			pr_err("Failed to assert reset, err: %d\n", ret);
+			return ret;
+		}
+
+		ret = reset_control_deassert(xhci->reset);
+		if (ret) {
+			pr_err("Failed to assert reset, err: %d\n", ret);
+			return ret;
+		}
+	}
+
 	ret = pci_enable_device(pdev);
 	if (ret) {
 		pr_err("Failed to enable device, err: %d\n", ret);
@@ -57,8 +78,6 @@ static int xhci_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	ctrl->hccr = pci_iomap(pdev, region);
 	ctrl->hcor = (struct xhci_hcor *)((uintptr_t)ctrl->hccr + 
 				HC_LENGTH(xhci_readl(&ctrl->hccr->cr_capbase)));
-
-	pr_info("IOMEM: [%p %p]\n", ctrl->hccr, ctrl->hcor);
 
 	ret = xhci_register(ctrl);
 	if (ret) {

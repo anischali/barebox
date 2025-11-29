@@ -39,6 +39,12 @@ config RESET_IMX7
 	help
 	  This enables the reset controller driver for i.MX7 SoCs.
 
+config RESET_RPI
+	bool "RPi4 xHCI Reset"
+	default ARCH_BCM283X
+	help
+	  This enables the reset of vl805 xhci controller driver for RPi4.
+
 config RESET_STARFIVE
 	bool "StarFive Controller Driver" if COMPILE_TEST
 	depends on COMMON_CLK

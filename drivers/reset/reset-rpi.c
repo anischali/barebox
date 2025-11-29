@@ -66,6 +66,8 @@ static int rpi_firmware_notify_xhci_reset(void)
 		return -EIO;
 	}
 
+	pr_info("xHCI reset successfull\n");
+
 	udelay(200);
 
 	return 0;

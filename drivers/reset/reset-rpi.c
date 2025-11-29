@@ -130,6 +130,14 @@ static struct driver rpi_reset_driver = {
 };
 device_platform_driver(rpi_reset_driver);
 
+static int rpi_reset_vl805(void)
+{
+	rpi_firmware_notify_xhci_reset();
+
+	return 0;
+}
+postcore_initcall(rpi_reset_vl805);
+
 MODULE_AUTHOR("Nicolas Saenz Julienne <nsaenzjulienne@suse.de>");
 MODULE_AUTHOR("Anis Chali <chalianis1@gmail.com>");
 MODULE_DESCRIPTION("Raspberry Pi 4 firmware reset driver");

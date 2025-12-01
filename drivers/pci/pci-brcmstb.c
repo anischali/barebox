@@ -778,14 +778,7 @@ static int brcm_pcie_probe(struct device *dev)
         return -ENOMEM;
     }
 
-	pcie->base = IOMEM(iores->start);
 	pcie->pci.parent = dev;
-	pcie->pci.pci_ops = &brcm_pcie_ops;
-	pcie->pci.set_busno = brcm_pcie_set_local_bus_nr;
-	pcie->pci.mem_resource = &pcie->mem;
-	pcie->pci.io_resource = &pcie->io;
-	pcie->pci.mem_pref_resource = &pcie->prefetch;
-
 	pci_controller_init(&pcie->pci);
 
     ret = brcm_pcie_parse_dt(pcie);
@@ -794,6 +787,13 @@ static int brcm_pcie_probe(struct device *dev)
         return ret;
     }
 
+	pcie->base = IOMEM(iores->start);
+	pcie->pci.pci_ops = &brcm_pcie_ops;
+	pcie->pci.set_busno = brcm_pcie_set_local_bus_nr;
+	pcie->pci.mem_resource = &pcie->mem;
+	pcie->pci.io_resource = &pcie->io;
+	pcie->pci.mem_pref_resource = &pcie->prefetch;
+	dev->priv = pcie;
     hose = &pcie->pci;
 
 	ret = brcm_pcie_setup(pcie);
@@ -807,10 +807,10 @@ static int brcm_pcie_probe(struct device *dev)
     return 0;
 }
 
-/*
-static int brcm_pcie_remove(struct udevice *dev)
+
+static void brcm_pcie_remove(struct device *dev)
 {
-	struct brcm_pcie *pcie = dev_get_priv(dev);
+	struct brcm_pcie *pcie = dev->priv;
 	void __iomem *base = pcie->base;
 
 	// Assert fundamental reset
@@ -818,13 +818,11 @@ static int brcm_pcie_remove(struct udevice *dev)
 
 	// Turn off SerDes
 	setbits_le32(base + PCIE_MISC_HARD_PCIE_HARD_DEBUG,
-		     PCIE_HARD_DEBUG_SERDES_IDDQ_MASK);
+		     PCIE_MISC_HARD_PCIE_HARD_DEBUG_SERDES_IDDQ_MASK);
 
 	// Shutdown bridge
 	setbits_le32(base + PCIE_RGR1_SW_INIT_1, PCIE_RGR1_SW_INIT_1_INIT_MASK);
-
-	return 0;
-}*/
+}
 
 static const struct of_device_id brcm_pcie_ids[] = {
 	{ .compatible = "brcm,bcm2711-pcie" },
@@ -835,6 +833,7 @@ MODULE_DEVICE_TABLE(of, brcm_pcie_ids);
 static struct driver pcie_ecam_driver = {
 	.name = "pcie-brcmstb",
 	.probe = brcm_pcie_probe,
+	.remove = brcm_pcie_remove,
 	.of_compatible = brcm_pcie_ids,
 };
 device_platform_driver(pcie_ecam_driver);

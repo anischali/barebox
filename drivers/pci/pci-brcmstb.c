@@ -181,7 +181,7 @@ static inline struct brcm_pcie *host_to_brcm(struct pci_controller *host)
  *
  * Return: The encoded inbound region size
  */
-static int __maybe_unused brcm_pcie_encode_ibar_size(u64 size)
+static int brcm_pcie_encode_ibar_size(u64 size)
 {
 	int log2_in = ilog2(size);
 
@@ -413,6 +413,8 @@ static void brcm_pcie_set_outbound_win(struct brcm_pcie *pcie,
 	int high_addr_shift;
 	u32 tmp;
 
+	pr_info("OUT WIN: idx=%d cpu_addr=0x%p pcie_addr=0x%p size=0x%p\n", win, cpu_addr, pcie_addr, size);
+
 	/* Set the base of the pcie_addr window */
 	writel(lower_32_bits(pcie_addr), pcie->base + PCIE_MEM_WIN0_LO(win));
 	writel(upper_32_bits(pcie_addr), pcie->base + PCIE_MEM_WIN0_HI(win));
@@ -456,44 +458,6 @@ static const struct pci_ops brcm_pcie_ops = {
 	.read	= brcm_pcie_read_config,
 	.write	= brcm_pcie_write_config,
 };
-
-static int brcm_pcie_setup_inbounds(struct brcm_pcie *pcie)
-{
-	struct device *dev = pcie->pci.parent;
-	struct device_node *np = dev->of_node;
-	struct of_pci_range_parser parser;
-	struct of_pci_range range;
-	struct resource res;
-    int num_out_wins = 0;
-
-	if (of_pci_range_parser_init(&parser, np)) {
-		pr_err("missing \"ranges\" property\n");
-		return -EINVAL;
-	}
-
-	for_each_of_pci_range(&parser, &range) {
-		of_pci_range_to_resource(&range, np, &res);
-
-		switch (res.flags & IORESOURCE_TYPE_BITS) {
-		case IORESOURCE_MEM:
-			if (res.flags & IORESOURCE_PREFETCH) {
-				continue;
-			} else {
-                
-                if (num_out_wins >= BRCM_NUM_PCIE_OUT_WINS)
-			        return -EINVAL;
-
-		        brcm_pcie_set_outbound_win(pcie, num_out_wins, res.start,
-					   range.pci_addr, SZ_128M);
-
-		        num_out_wins++;
-			}
-			break;
-		}
-	}
-
-    return 0;
-}
 
 static int brcm_pcie_parse_dt(struct brcm_pcie *pcie)
 {
@@ -626,11 +590,15 @@ static inline int brcm_pcie_get_rc_bar2_size_and_offset(struct brcm_pcie *pcie,
 
 static int brcm_pcie_setup(struct brcm_pcie *pcie)
 {
+	struct pci_controller *pci = &pcie->pci;
 	u64 rc_bar2_offset, rc_bar2_size;
 	void __iomem *base = pcie->base;
-	unsigned int scb_size_val;
+	struct resource_entry *entry;
 	bool ssc_good = false;
+	struct resource *res;
+	int num_out_wins = 0;
 	u16 nlw, cls, lnksta;
+	unsigned int scb_size_val;
 	int i, ret;
 	u32 tmp;
 
@@ -649,11 +617,17 @@ static int brcm_pcie_setup(struct brcm_pcie *pcie)
 	/* Wait for SerDes to be stable */
 	udelay(200);
 
+	/*
+	 * SCB_MAX_BURST_SIZE is a two bit field.  For GENERIC chips it
+	 * is encoded as 0=128, 1=256, 2=512, 3=Rsvd, for BCM7278 it
+	 * is encoded as 0=Rsvd, 1=128, 2=256, 3=512.
+	 */
+
 	/* Set SCB_MAX_BURST_SIZE, CFG_READ_UR_MODE, SCB_ACCESS_EN */
+	tmp = readl(base + PCIE_MISC_MISC_CTRL);
 	u32p_replace_bits(&tmp, 1, PCIE_MISC_MISC_CTRL_SCB_ACCESS_EN_MASK);
 	u32p_replace_bits(&tmp, 1, PCIE_MISC_MISC_CTRL_CFG_READ_UR_MODE_MASK);
-	u32p_replace_bits(&tmp, PCIE_MISC_MISC_CTRL_MAX_BURST_SIZE_128,
-			  PCIE_MISC_MISC_CTRL_MAX_BURST_SIZE_MASK);
+	u32p_replace_bits(&tmp, 0, PCIE_MISC_MISC_CTRL_MAX_BURST_SIZE_MASK);
 	writel(tmp, base + PCIE_MISC_MISC_CTRL);
 
 	ret = brcm_pcie_get_rc_bar2_size_and_offset(pcie, &rc_bar2_size,
@@ -714,20 +688,25 @@ static int brcm_pcie_setup(struct brcm_pcie *pcie)
 		return -EINVAL;
 	}
 
-	brcm_pcie_setup_inbounds(pcie);
+	resource_list_for_each_entry(entry, &pci->windows) {
+		res = entry->res;
 
-		/*
-	 * We used to enable the CLKREQ# input here, but a few PCIe cards don't
-	 * attach anything to the CLKREQ# line, so we shouldn't assume that
-	 * it's connected and working. The controller does allow detecting
-	 * whether the port on the other side of our link is/was driving this
-	 * signal, so we could check before we assume. But because this signal
-	 * is for power management, which doesn't make sense in a bootloader,
-	 * let's instead just unadvertise ASPM support.
-	 */
+		if (resource_type(res) != IORESOURCE_MEM)
+			continue;
+
+		if (num_out_wins >= BRCM_NUM_PCIE_OUT_WINS) {
+			pr_err("too many outbound wins\n");
+			return -EINVAL;
+		}
+
+		brcm_pcie_set_outbound_win(pcie, num_out_wins, res->start,
+					   res->start - entry->offset,
+					   resource_size(res));
+		num_out_wins++;
+	}
+
 	clrbits_le32(base + PCIE_RC_CFG_PRIV1_LINK_CAPABILITY,
 		PCIE_RC_CFG_PRIV1_LINK_CAPABILITY_ASPM_SUPPORT_MASK);
-
 	/*
 	 * For config space accesses on the RC, show the right class for
 	 * a PCIe-PCIe bridge (the default setting is to be EP mode).

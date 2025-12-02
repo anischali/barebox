@@ -564,15 +564,22 @@ static inline int brcm_pcie_get_rc_bar2_size_and_offset(struct brcm_pcie *pcie,
 							u64 *rc_bar2_size,
 							u64 *rc_bar2_offset)
 {
+	struct pci_controller *pci = &pcie->pci;
+	struct resource_entry *entry;
+
+	entry = resource_list_first_type(&pci->windows, IORESOURCE_MEM);
+	if (!entry)
+		return -ENODEV;
+
+
 	/*
 	 * The controller expects the inbound window offset to be calculated as
 	 * the difference between PCIe's address space and CPU's. The offset
 	 * provided by the firmware is calculated the opposite way, so we
 	 * negate it.
 	 */
-	// TODO: offset need to be calculated from dtb
-	*rc_bar2_offset = 0;
-	*rc_bar2_size = 1ULL << fls64(pcie->mem.end - pcie->mem.start);
+	*rc_bar2_offset = -entry->offset;
+	*rc_bar2_size = 1ULL << fls64(entry->res->end - entry->res->start);
 
 	/*
 	 * We validate the inbound memory view even though we should trust
@@ -607,7 +614,7 @@ static inline int brcm_pcie_get_rc_bar2_size_and_offset(struct brcm_pcie *pcie,
 	 *   outbound memory @ 3GB). So instead it will  start at the 1x
 	 *   multiple of its size
 	 */
-	if (!*rc_bar2_size || (*rc_bar2_offset & (*rc_bar2_size - 1)) ||
+	if (!*rc_bar2_size || *rc_bar2_offset % *rc_bar2_size ||
 	    (*rc_bar2_offset < SZ_4G && *rc_bar2_offset > SZ_2G)) {
 		pr_err("Invalid rc_bar2_offset/size: size 0x%llx, off 0x%llx\n",
 			*rc_bar2_size, *rc_bar2_offset);
@@ -762,6 +769,79 @@ static int brcm_pcie_setup(struct brcm_pcie *pcie)
 	return 0;
 }
 
+static void brcm_pcie_dump_regs(struct brcm_pcie *pcie)
+{
+	void __iomem *b = pcie->base;
+	int i;
+
+	pr_info("\n==== BRCM PCIe Debug Dump ====\n");
+
+	/* -------- STATUS REGISTERS -------- */
+	pr_info("PCIE_MISC_PCIE_STATUS        = 0x%08x\n",
+		readl(b + PCIE_MISC_PCIE_STATUS));
+
+	pr_info("PCIE_MISC_MISC_CTRL          = 0x%08x\n",
+		readl(b + PCIE_MISC_MISC_CTRL));
+
+	pr_info("PCIE_RGR1_SW_INIT_1          = 0x%08x\n",
+		readl(b + PCIE_RGR1_SW_INIT_1));
+
+	pr_info("PCIE_RC_CFG_VENDOR_SPEC_REG1 = 0x%08x\n",
+		readl(b + PCIE_RC_CFG_VENDOR_VENDOR_SPECIFIC_REG1));
+
+	/* -------- BAR CONFIG -------- */
+	pr_info("BAR1 LO = 0x%08x\n", readl(b + PCIE_MISC_RC_BAR1_CONFIG_LO));
+	pr_info("BAR2 LO = 0x%08x\n", readl(b + PCIE_MISC_RC_BAR2_CONFIG_LO));
+	pr_info("BAR2 HI = 0x%08x\n", readl(b + PCIE_MISC_RC_BAR2_CONFIG_HI));
+	pr_info("BAR3 LO = 0x%08x\n", readl(b + PCIE_MISC_RC_BAR3_CONFIG_LO));
+
+	/* -------- MEMORY OUTBOUND WINDOWS -------- */
+	for (i = 0; i < BRCM_NUM_PCIE_OUT_WINS; i++) {
+		u32 lo  = readl(b + PCIE_MEM_WIN0_LO(i));
+		u32 hi  = readl(b + PCIE_MEM_WIN0_HI(i));
+		u32 bl  = readl(b + PCIE_MEM_WIN0_BASE_LIMIT(i));
+		u32 bhi = readl(b + PCIE_MEM_WIN0_BASE_HI(i));
+		u32 lhi = readl(b + PCIE_MEM_WIN0_LIMIT_HI(i));
+
+		pr_info("Outbound WIN%d:\n", i);
+		pr_info("  PCIE_ADDR      = %08x:%08x\n", hi, lo);
+		pr_info("  BASE_LIMIT_LO  = 0x%08x\n", bl);
+		pr_info("  BASE_HI        = 0x%08x\n", bhi);
+		pr_info("  LIMIT_HI       = 0x%08x\n", lhi);
+	}
+
+	/* -------- MSI INTERRUPTS -------- */
+	pr_info("MSI_INTR2_MASK_SET = 0x%08x\n",
+		readl(b + PCIE_MSI_INTR2_MASK_SET));
+	pr_info("MSI_INTR2_CLR      = 0x%08x\n",
+		readl(b + PCIE_MSI_INTR2_CLR));
+
+	/* -------- LINK CAPABILITIES -------- */
+	pr_info("Link Cap Reg  (0x4dc) = 0x%08x\n",
+		readl(b + PCIE_RC_CFG_PRIV1_LINK_CAPABILITY));
+	pr_info("Link Status Reg      = 0x%04x\n",
+		readw(b + BRCM_PCIE_CAP_REGS + PCI_EXP_LNKSTA));
+	pr_info("Link Ctrl2 Reg       = 0x%04x\n",
+		readw(b + BRCM_PCIE_CAP_REGS + PCI_EXP_LNKCTL2));
+
+	/* -------- MDIO / SSC / SERDES -------- */
+	u32 mdio_rd;
+	brcm_pcie_mdio_read(b, MDIO_PORT0, SSC_CNTL_OFFSET, &mdio_rd);
+	pr_info("MDIO SSC_CNTL         = 0x%08x\n", mdio_rd);
+	brcm_pcie_mdio_read(b, MDIO_PORT0, SSC_STATUS_OFFSET, &mdio_rd);
+	pr_info("MDIO SSC_STATUS       = 0x%08x\n", mdio_rd);
+
+	pr_info("PCIE_HARD_DEBUG       = 0x%08x\n",
+		readl(b + PCIE_MISC_HARD_PCIE_HARD_DEBUG));
+
+	/* -------- EXT CFG -------- */
+	pr_info("EXT_CFG_INDEX         = 0x%08x\n",
+		readl(b + PCIE_EXT_CFG_INDEX));
+
+	pr_info("==== END =====\n\n");
+}
+
+
 static int brcm_pcie_probe(struct device *dev)
 {
 	struct brcm_pcie *pcie;
@@ -803,6 +883,9 @@ static int brcm_pcie_probe(struct device *dev)
 	}
 
 	register_pci_controller(&pcie->pci);
+
+	if (IS_ENABLED(CONFIG_PCI_DEBUG))
+		brcm_pcie_dump_regs(pcie);
 
     return 0;
 }

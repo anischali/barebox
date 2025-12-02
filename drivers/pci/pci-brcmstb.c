@@ -413,8 +413,6 @@ static void brcm_pcie_set_outbound_win(struct brcm_pcie *pcie,
 	int high_addr_shift;
 	u32 tmp;
 
-	pr_info("OUT WIN: idx=%d cpu_addr=0x%p pcie_addr=0x%p size=0x%p\n", win, cpu_addr, pcie_addr, size);
-
 	/* Set the base of the pcie_addr window */
 	writel(lower_32_bits(pcie_addr), pcie->base + PCIE_MEM_WIN0_LO(win));
 	writel(upper_32_bits(pcie_addr), pcie->base + PCIE_MEM_WIN0_HI(win));
@@ -529,21 +527,23 @@ static inline int brcm_pcie_get_rc_bar2_size_and_offset(struct brcm_pcie *pcie,
 							u64 *rc_bar2_offset)
 {
 	struct pci_controller *pci = &pcie->pci;
-	struct resource_entry *entry;
-
-	entry = resource_list_first_type(&pci->windows, IORESOURCE_MEM);
-	if (!entry)
-		return -ENODEV;
-
-
+	struct device *dev = pci->parent;
+	u64 dma_addr, paddr, size;
+	int ret;
 	/*
 	 * The controller expects the inbound window offset to be calculated as
 	 * the difference between PCIe's address space and CPU's. The offset
 	 * provided by the firmware is calculated the opposite way, so we
 	 * negate it.
 	 */
-	*rc_bar2_offset = -entry->offset;
-	*rc_bar2_size = 1ULL << fls64(entry->res->end - entry->res->start);
+	ret = of_dma_get_range(dev->of_node, &dma_addr, &paddr, &size);
+	if (ret < 0) {
+		*rc_bar2_offset = dma_addr = 0;
+	} else {
+		*rc_bar2_offset = paddr - dma_addr;
+	}
+
+	*rc_bar2_size = 1ULL << fls64(size - 1);
 
 	/*
 	 * We validate the inbound memory view even though we should trust

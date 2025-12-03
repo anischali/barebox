@@ -527,15 +527,25 @@ static inline int brcm_pcie_get_rc_bar2_size_and_offset(struct brcm_pcie *pcie,
 							u64 *rc_bar2_offset)
 {
 	struct pci_controller *pci = &pcie->pci;
+	struct device *dev = pci->parent;
+	u64 dma_addr, paddr, size;
+	int ret;
 	/*
 	 * The controller expects the inbound window offset to be calculated as
 	 * the difference between PCIe's address space and CPU's. The offset
 	 * provided by the firmware is calculated the opposite way, so we
 	 * negate it.
 	 */
-	*rc_bar2_offset = pci->mem_offset;
-	*rc_bar2_size = 1ULL << fls64(resource_size(&pcie->mem) - 1);
+	ret = of_dma_get_range(dev->of_node, &dma_addr, &paddr, &size);
+	if (ret) {
+		pr_err("no dma ranges available, %d\n", ret);
+		return -EINVAL;
+	}
 
+	*rc_bar2_offset = paddr - dma_addr;
+	*rc_bar2_size = 1ULL << fls64(size - 1);
+
+	pr_info("DMA PHYS: [0x%lp-0x%lp-0x%lp]\n", dma_addr, size, paddr);
 	/*
 	 * We validate the inbound memory view even though we should trust
 	 * whatever the device-tree provides. This is because of an HW issue on

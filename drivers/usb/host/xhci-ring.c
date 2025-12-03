@@ -297,6 +297,10 @@ void xhci_queue_command(struct xhci_ctrl *ctrl, dma_addr_t addr, u32 slot_id,
 {
 	u32 fields[4];
 
+	pr_info("hccr: %p hcor: %p run_regs: %p\n", ctrl->hccr, ctrl->hcor, ctrl->run_regs);
+	pr_info("xHCI: ctrl: %s addr: %llx slot: %d ep: %d cmd: %d\n", 
+			dev_name(ctrl->dev), addr, slot_id, ep_index, cmd);
+
 	BUG_ON(prepare_ring(ctrl, ctrl->cmd_ring, EP_STATE_RUNNING));
 
 	fields[0] = lower_32_bits(addr);
@@ -685,7 +689,10 @@ int xhci_bulk_tx(struct usb_device *udev, unsigned long pipe,
 
 	map = addr = dma_map_single(ctrl->host.hw_dev, bounce, length, direction);
 
-	dev_dbg(&udev->dev, "pipe=0x%lx, buffer=%p, length=%d\n",
+	dev_info(&udev->dev, "map=0x%lx, addr=%p, bounce=%d\n",
+		map, addr, length);
+
+	dev_info(&udev->dev, "pipe=0x%lx, buffer=%p, length=%d\n",
 		pipe, buffer, length);
 
 	ep_index = usb_pipe_ep_index(pipe);
@@ -955,7 +962,7 @@ int xhci_ctrl_tx(struct usb_device *udev, unsigned long pipe,
 		}
 	}
 
-	dev_dbg(&udev->dev, "req->requesttype = %d, req->request = %d,"
+	dev_info(&udev->dev, "req->requesttype = %d, req->request = %d,"
 		"le16_to_cpu(req->value) = %d,"
 		"le16_to_cpu(req->index) = %d,"
 		"le16_to_cpu(req->length) = %d\n",

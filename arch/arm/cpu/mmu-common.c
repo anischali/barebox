@@ -47,7 +47,7 @@ void *dma_alloc_map(struct device *dev,
 	size = PAGE_ALIGN(size);
 	ret = xmemalign(PAGE_SIZE, size);
 	if (dma_handle)
-		*dma_handle = (dma_addr_t)ret;
+		*dma_handle = cpu_to_dma(dev, ret);
 
 	memset(ret, 0, size);
 	dma_flush_range(ret, size);

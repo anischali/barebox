@@ -23,6 +23,7 @@
 #include <linux/usb/usb.h>
 #include <linux/usb/xhci.h>
 #include <asm/unaligned.h>
+#include <asm/cache.h>
 
 #include "xhci.h"
 
@@ -86,11 +87,11 @@ static void *xhci_malloc(struct xhci_ctrl *ctrl, unsigned int size, dma_addr_t *
 {
 	void *ptr;
 
-	ptr = dma_alloc_coherent(DMA_DEVICE_BROKEN, size, dma_addr);
+	ptr = dma_alloc_coherent(ctrl->host.hw_dev, size, dma_addr);
 	if (!ptr)
 		return NULL;
 
-	dev_dbg(ctrl->dev, "%s: 0x%p (size %d)\n", __func__, ptr, size);
+	dev_info(ctrl->dev, "%s: dma_addr: 0x%p ptr: 0x%p (size %d)\n", __func__, dma_addr, ptr, size);
 
 	return ptr;
 }
@@ -603,6 +604,8 @@ int xhci_mem_init(struct xhci_ctrl *ctrl, struct xhci_hccr *hccr,
 	xhci_scratchpad_alloc(ctrl);
 
 	ctrl->bounce_buffer = xmemalign(SZ_64K, SZ_64K);
+
+	pr_info("bounce buffer: 0x%lx\n", ctrl->bounce_buffer);
 
 	/* initializing the virtual devices to NULL */
 	for (i = 0; i < MAX_HC_SLOTS; ++i)

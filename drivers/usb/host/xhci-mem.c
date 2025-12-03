@@ -91,7 +91,7 @@ static void *xhci_malloc(struct xhci_ctrl *ctrl, unsigned int size, dma_addr_t *
 	if (!ptr)
 		return NULL;
 
-	dev_info(ctrl->dev, "%s: dma_addr: 0x%p ptr: 0x%p (size %d)\n", __func__, dma_addr, ptr, size);
+	dev_info(ctrl->dev, "%s: dma_addr: 0x%pad ptr: 0x%p (size %d)\n", __func__, dma_addr, ptr, size);
 
 	return ptr;
 }

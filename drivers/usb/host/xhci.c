@@ -747,6 +747,7 @@ static int _xhci_alloc_device(struct usb_device *udev)
 		return 0;
 	}
 
+	pr_info("dma_offset: %lx - %d\n", ctrl->host.hw_dev->dma_mask, ctrl->host.hw_dev->dma_mask != 0);
 	xhci_queue_command(ctrl, 0, 0, 0, TRB_ENABLE_SLOT);
 	event = xhci_wait_for_event(ctrl, TRB_COMPLETION, XHCI_TIMEOUT_DEFAULT);
 	if (!event)

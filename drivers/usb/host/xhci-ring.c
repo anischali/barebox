@@ -215,6 +215,8 @@ static dma_addr_t queue_trb(struct xhci_ctrl *ctrl, struct xhci_ring *ring,
 
 	addr = xhci_trb_virt_to_dma(ring->enq_seg, (union xhci_trb *)trb);
 
+	dev_info(ctrl->dev, "%s: dma_addr: 0x%lx ptr: 0x%p\n", __func__, addr, trb);
+
 	inc_enq(ctrl, ring, more_trbs_coming);
 
 	return addr;

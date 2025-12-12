@@ -833,7 +833,6 @@ static int brcm_pcie_probe(struct device *dev)
 	if (IS_ERR(iores))
 		return PTR_ERR(iores);
 
-	dev->dma_offset = 0x80000000;
 	pcie = xzalloc(sizeof(*pcie));
     if (!pcie) {
         return -ENOMEM;

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 2025
-PATCHLEVEL = 11
+PATCHLEVEL = 12
 SUBLEVEL = 0
 EXTRAVERSION =
 NAME = None
@@ -618,6 +618,9 @@ include $(srctree)/arch/$(SRCARCH)/Makefile
 export KBUILD_DEFCONFIG CC_VERSION_TEXT
 endif
 
+%_efiloader_defconfig: FORCE
+	$(call merge_into_defconfig,$*_defconfig,efi-loader)
+
 config: outputmakefile scripts_basic FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig KCONFIG_DEFCONFIG_LIST= $@
 
@@ -1083,7 +1086,9 @@ PHONY += check
 # ---------------------------------------------------------------------------
 barebox: $(BAREBOX_LDS) $(BAREBOX_OBJS) $(kallsyms.o) FORCE
 	$(call if_changed_rule,barebox__)
+ifeq ($(BAREBOX_PROPER),barebox)
 	$(Q)rm -f .old_version
+endif
 
 barebox.fit: images/barebox-$(CONFIG_ARCH_LINUX_NAME).fit
 	$(Q)ln -fsn $< $@
@@ -1141,7 +1146,7 @@ scripts: scripts_basic scripts_dtc include/generated/utsrelease.h
 PHONY += prepare archprepare prepare0
 
 archprepare: outputmakefile scripts_basic include/config/kernel.release \
-	$(version_h) include/generated/utsrelease.h include/config.h \
+	$(version_h) include/generated/utsrelease.h \
 	include/generated/autoconf.h
 
 prepare0: archprepare FORCE
@@ -1158,21 +1163,6 @@ prepare: prepare0
 # done in arch/$(SRCARCH)/kernel/Makefile
 
 export CPPFLAGS_barebox.lds += -C -U$(SRCARCH)
-
-define symlink-config-h
-	if [ -f $(srctree)/$(BOARD)/config.h ]; then		\
-		$(kecho) '  SYMLINK $@ -> $(BOARD)/config.h';	\
-		ln -fsn $(srctree)/$(BOARD)/config.h $@;	\
-	else							\
-		[ -h $@ ] && rm -f $@;				\
-		$(kecho) '  CREATE  $@';			\
-		touch -a $@;					\
-	fi
-endef
-
-PHONY += include/config.h
-include/config.h:
-	$(Q)$(symlink-config-h)
 
 # Create $(FIRMWARE_DIR) from $(CONFIG_EXTRA_FIRMWARE_DIR) -- if it doesn't have a
 # leading /, it's relative to $(srctree).
@@ -1386,11 +1376,9 @@ endif # CONFIG_MODULES
 CLEAN_DIRS  += $(MODVERDIR)
 CLEAN_FILES +=	barebox System.map include/generated/barebox_default_env.h \
                 .tmp_version .tmp_barebox* barebox.bin barebox.map \
-		.tmp_kallsyms* barebox.ldr compile_commands.json \
+		.tmp_kallsyms* compile_commands.json \
 		.tmp_barebox.o barebox.o barebox-flash-image \
-		barebox.srec barebox.s5p barebox.ubl \
-		barebox.uimage \
-		barebox.efi barebox.canon-a1100.bin
+		barebox.srec barebox.efi
 
 CLEAN_FILES +=	scripts/bareboxenv-target scripts/kernel-install-target \
 		scripts/bareboxcrc32-target scripts/bareboximd-target \
@@ -1400,7 +1388,7 @@ CLEAN_FILES +=	scripts/bareboxenv-target scripts/kernel-install-target \
 # Directories & files removed with 'make mrproper'
 MRPROPER_DIRS  += include/config usr/include include/generated Documentation/commands
 MRPROPER_FILES += .config .config.old .security_config .version .old_version \
-                  include/config.h *.sconfig.old          \
+                  *.sconfig.old          \
 		  Module.symvers tags TAGS cscope*
 
 # clean - Delete most, but leave enough to build external modules
@@ -1497,6 +1485,8 @@ endif
 	@echo  '  tags/TAGS	  - Generate tags file for editors'
 	@echo  '  cscope	  - Generate cscope index'
 	@echo  '                    (default: $(INSTALL_HDR_PATH))'
+	@echo  'Documentation targets:'
+	@$(MAKE) -f $(srctree)/Documentation/Makefile dochelp
 	@echo  ''
 	@echo  'Architecture specific targets ($(SRCARCH)):'
 	@$(if $(archhelp),$(archhelp),\
@@ -1520,6 +1510,15 @@ endif
 	@echo  ''
 	@echo  'Execute "make" or "make all" to build all targets marked with [*] '
 	@echo  'For further info see the documentation'
+
+
+# Documentation targets
+# ---------------------------------------------------------------------------
+DOC_TARGETS := docs htmldocs dochelp
+
+PHONY += $(DOC_TARGETS)
+$(DOC_TARGETS):
+	$(Q)$(MAKE) -f $(srctree)/Documentation/Makefile $@
 
 # Code Coverage
 # ---------------------------------------------------------------------------
@@ -1546,15 +1545,6 @@ quiet_cmd_tags = GEN     $@
 
 tags TAGS cscope gtags: FORCE
 	$(call cmd,tags)
-
-SPHINXBUILD   = sphinx-build
-ALLSPHINXOPTS   =  source
-
-docs: FORCE
-	@mkdir -p $(srctree)/Documentation/commands
-	@$(srctree)/Documentation/gen_commands.py $(srctree) $(srctree)/Documentation/commands
-	@$(SPHINXBUILD) -b html -d $(objtree)/doctrees $(srctree)/Documentation \
-		$(objtree)/Documentation/html
 
 bareboxversion:
 	@echo $(KERNELVERSION)

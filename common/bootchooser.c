@@ -962,6 +962,7 @@ static int bootchooser_add_entry(struct bootentries *entries, const char *name)
 }
 
 static struct bootentry_provider bootchooser_entry_provider = {
+	.name = "bootchooser",
 	.generate = bootchooser_add_entry,
 };
 
@@ -1007,6 +1008,8 @@ BAREBOX_MAGICVAR(global.bootchooser.default_attempts,
 		 "bootchooser: Default number of attempts for a target");
 BAREBOX_MAGICVAR(global.bootchooser.reset_attempts,
 		"bootchooser: Choose condition to reset number of attempts for all enabled targets ('power-on', 'all-zero', 'reset')");
+BAREBOX_MAGICVAR(global.bootchooser.reset_priorities,
+		"bootchooser: Choosen condition to reset priority of all targets (default: '', 'all-zero')");
 BAREBOX_MAGICVAR(global.bootchooser.default_priority,
 		 "bootchooser: Default priority for a target");
 BAREBOX_MAGICVAR(global.bootchooser.state_prefix,

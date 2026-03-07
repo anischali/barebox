@@ -58,6 +58,8 @@ $(pbl-lds): $(obj)/../arch/$(SRCARCH)/lib/pbl.lds.S FORCE
 
 ifeq ($(CONFIG_PBL_IMAGE_NO_PIGGY),)
 BAREBOX_PIGGY_OBJS = $(obj)/piggy.o $(obj)/sha_sum.o
+else
+BAREBOX_PIGGY_OBJS = $(obj)/../$(BAREBOX_PROPER)
 endif
 
 quiet_cmd_elf__ ?= LD      $@
@@ -214,6 +216,16 @@ pblb-$(CONFIG_PBL_SINGLE_IMAGE) += start_pbl
 FILE_barebox.img = start_pbl.pblb
 image-$(CONFIG_PBL_SINGLE_IMAGE) += barebox.img
 endif
+
+FILE_barebox.vfat = $(if $(CONFIG_EFI_STUB),barebox-dt-2nd.img,../barebox.efi)
+FILE_barebox.esp = barebox.vfat
+image-$(CONFIG_EFI_PAYLOAD_ESP_IMAGE) += barebox.esp barebox.vfat
+
+.SECONDEXPANSION:
+$(obj)/barebox.vfat: $(obj)/$$(FILE_$$(@F))
+	$(Q)$(srctree)/scripts/mkvfat $@ $< $(CONFIG_EFI_PAYLOAD_DEFAULT_PATH)
+$(obj)/barebox.esp: $(obj)/$$(FILE_$$(@F))
+	$(Q)$(srctree)/scripts/mkesp $@ $<
 
 ifneq ($(pblx-y)$(pblx-),)
   $(error pblx- has been removed. Please use pblb- instead.)

@@ -25,6 +25,7 @@ class Status(enum.Enum):
     qemu_dry_run = 3
     qemu_interactive = 4
     qemu_dump_dtb = 5
+    shell = 6
 
 
 @target_factory.reg_driver
@@ -35,6 +36,7 @@ class BareboxTestStrategy(Strategy):
         "power": "PowerProtocol",
         "console": "ConsoleProtocol",
         "barebox": "BareboxDriver",
+        "shell": {"ShellDriver", None},
     }
 
     status = attr.ib(default=Status.unknown)
@@ -55,6 +57,9 @@ class BareboxTestStrategy(Strategy):
             step.skip("nothing to do")
             return  # nothing to do
         elif status == Status.off:
+            self.target.deactivate(self.barebox)
+            if self.shell:
+                self.target.deactivate(self.shell)
             self.target.deactivate(self.console)
             self.target.activate(self.power)
             self.power.off()
@@ -65,6 +70,12 @@ class BareboxTestStrategy(Strategy):
             self.power.cycle()
             # interrupt barebox
             self.target.activate(self.barebox)
+        elif status == Status.shell:
+            # transition to barebox
+            self.transition(Status.barebox)  # pylint: disable=missing-kwoa
+            self.barebox.boot("")
+            self.barebox.await_boot()
+            self.target.activate(self.shell)
         else:
             raise StrategyError(
                 "no transition found from {} to {}".
@@ -92,6 +103,9 @@ class BareboxTestStrategy(Strategy):
         if state.startswith("qemu_"):
             if state == "qemu_dump_dtb":
                 self.qemu.machine += f",dumpdtb={self.target.name}.dtb"
+
+            if self.qemu is None:
+                pytest.exit(f"Can't enter {state} for non-QEMU target")
 
             cmd = self.qemu.get_qemu_base_args()
 

@@ -335,7 +335,7 @@ static int genpd_add_device(struct generic_pm_domain *genpd, struct device *dev)
 {
 	dev->pm_domain = genpd;
 
-	if (genpd->attach_dev)
+	if (genpd && genpd->attach_dev)
 		return genpd->attach_dev(genpd, dev);
 
 	return 0;
@@ -344,7 +344,7 @@ static int genpd_add_device(struct generic_pm_domain *genpd, struct device *dev)
 static void genpd_remove_device(struct generic_pm_domain *genpd,
 			       struct device *dev)
 {
-	if (genpd->detach_dev)
+	if (genpd && genpd->detach_dev)
 		genpd->detach_dev(genpd, dev);
 
 	dev->pm_domain = NULL;
@@ -393,8 +393,21 @@ static int __genpd_dev_pm_attach(struct device *dev,
 		if (ret == -ENOENT)
 			ret = -EPROBE_DEFER;
 
-		if (!have_genpd_providers && ret == -EPROBE_DEFER)
-			return 0;
+		if (ret == -EPROBE_DEFER) {
+			/*
+			 * New platforms should either have power domain drivers
+			 * or they should use barebox,allow-dummy, so above
+			 * genpd_get_from_provider() returns NULL.
+			 */
+			if (deep_probe_is_supported()) {
+				dev_warn(dev, "power domain not found (ignoring)\n");
+				return 0;
+			}
+			if (!have_genpd_providers) {
+				dev_dbg(dev, "power domain not found (ignoring)\n");
+				return 0;
+			}
+		}
 
 		/*
 		 * Assume that missing genpds are unresolved
@@ -493,11 +506,11 @@ struct device *genpd_dev_pm_attach_by_id(struct device *dev,
 	if (!virt_dev)
 		return ERR_PTR(-ENOMEM);
 
-	dev_set_name(virt_dev, "genpd");
+	dev_set_name(virt_dev, "genpd:%u:%s", index, dev_name(dev));
 	virt_dev->bus = &genpd_bus_type;
 	virt_dev->parent = dev;
 	virt_dev->of_node = dev->of_node;
-	virt_dev->id = index;
+	virt_dev->id = DEVICE_ID_SINGLE;
 
 	ret = device_register(virt_dev);
 	if (ret) {

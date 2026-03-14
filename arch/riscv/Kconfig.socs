@@ -15,6 +15,19 @@ config BOARD_ERIZO_GENERIC
 	depends on SOC_ERIZO
 	def_bool y
 
+config SOC_SPACEMIT_K1
+	bool "Spacemit K1 SoC"
+	depends on ARCH_RV64I
+	select HAS_DEBUG_LL
+	select HAS_NMON
+	select USE_COMPRESSED_DTB
+	select RISCV_M_MODE
+	select RISCV_TIMER
+
+config BOARD_SPACEMIT_K1
+	depends on SOC_SPACEMIT_K1
+	def_bool y
+
 config SOC_VIRT
 	bool "QEMU Virt Machine"
 	select RISCV_S_MODE

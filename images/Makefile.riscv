@@ -11,6 +11,10 @@ pblb-$(CONFIG_BOARD_ERIZO_GENERIC) += start_erizo_generic
 FILE_barebox-erizo-generic.img = start_erizo_generic.pblb
 image-$(CONFIG_BOARD_ERIZO_GENERIC) += barebox-erizo-generic.img barebox-erizo-generic.nmon
 
+pblb-$(CONFIG_BOARD_SPACEMIT_K1) += start_spacemit_k1
+FILE_barebox-spacemit-k1.img = start_spacemit_k1.pblb
+image-$(CONFIG_BOARD_SPACEMIT_K1) += barebox-spacemit-k1.img barebox-spacemit-k1.nmon
+
 pblb-$(CONFIG_BOARD_HIFIVE) += start_hifive_unmatched start_hifive_unleashed
 FILE_barebox-hifive-unmatched.img = start_hifive_unmatched.pblb
 FILE_barebox-hifive-unleashed.img = start_hifive_unleashed.pblb

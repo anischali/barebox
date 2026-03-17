@@ -809,12 +809,14 @@ int dwc2_core_reset(struct dwc2 *dwc2)
 	greset |= GRSTCTL_CSFTRST;
 	dwc2_writel(dwc2, greset, GRSTCTL);
 
+	/*
 	ret = dwc2_wait_bit_clear(dwc2, GRSTCTL, GRSTCTL_CSFTRST, 10000);
 	if (ret) {
 		dwc2_warn(dwc2, "%s: Timeout! Waiting for Core Soft Reset\n",
 				__func__);
 		return ret;
 	}
+	*/
 
 	if (wait_for_host_mode)
 		dwc2_wait_for_mode(dwc2, wait_for_host_mode);

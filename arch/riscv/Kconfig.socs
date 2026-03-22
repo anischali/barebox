@@ -19,8 +19,7 @@ config SOC_SPACEMIT_K1
 	bool "Spacemit K1 SoC"
 	depends on ARCH_RV64I
 	select HAS_DEBUG_LL
-	select HAS_NMON
-	select USE_COMPRESSED_DTB
+	select DEBUG_SPACEMIT_K1
 	select RISCV_M_MODE
 	select RISCV_TIMER
 

@@ -34,6 +34,11 @@
 #define DEBUG_LL_UART_CLK       (24000000 / 16)
 #define DEBUG_LL_UART_SHIFT	2
 #define DEBUG_LL_UART_IOSIZE32
+#elif defined CONFIG_DEBUG_SPACEMIT_K1
+#define DEBUG_LL_UART_ADDR	0xD4017000
+#define DEBUG_LL_UART_CLK       14857000
+#define DEBUG_LL_UART_SHIFT	2
+#define DEBUG_LL_UART_IOSIZE32
 #endif
 
 #define DEBUG_LL_UART_BPS       CONFIG_BAUDRATE
@@ -68,6 +73,9 @@ static inline void PUTC_LL(char ch)
 	htif_putc(IOMEM(HTIF_DEFAULT_BASE_ADDR), ch);
 }
 #endif
+
+#elif defined CONFIG_DEBUG_SPACEMIT_K1
+#include <asm/debug_ll_spacemit.h>
 
 #endif
 

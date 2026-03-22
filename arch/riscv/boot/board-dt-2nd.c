@@ -80,6 +80,8 @@ static void noinline __noreturn start_dt_2nd_nonnaked(unsigned long hartid,
 	    _fdt < riscv_mem_stack_top(membase, endmem))
 		memsize = ALIGN_DOWN(_fdt - membase, SZ_1M);
 
+
+	putchar('>');
 	barebox_riscv_supervisor_entry(membase, memsize, hartid, fdt);
 }
 

@@ -31,6 +31,7 @@ void __noreturn __naked barebox_riscv_entry(unsigned long membase, unsigned long
 
 #define barebox_riscv_supervisor_entry(membase, memsize, hartid, boarddata) do { \
 	__asm__ volatile("mv tp, %0\n" : : "r"(hartid)); \
+	putchar('>'); \
 	barebox_riscv_entry(membase, memsize, boarddata, RISCV_S_MODE); \
 } while (0)
 

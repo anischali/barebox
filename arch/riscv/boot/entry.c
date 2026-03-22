@@ -26,6 +26,7 @@ void __noreturn __naked barebox_riscv_entry(unsigned long membase,
 	unsigned long stack_top = riscv_mem_stack_top(membase, membase + memsize);
 	asm volatile ("move sp, %0" : : "r"(stack_top));
 	riscv_set_flags(flags);
+	putchar('>');
 	barebox_pbl_start(membase, memsize, boarddata);
 }
 

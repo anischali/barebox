@@ -15,9 +15,14 @@ ENTRY_FUNCTION(start_spacemit_k1, a0, a1, a2)
 	putc_ll('>');
 	/* On POR, we are running from read-only memory here. */
 
-	fdt = __dtb_z_spacemit_k1_start + get_runtime_offset();
+    
+    if (a1 != 0xffffffff) {
+        fdt = (void *)a1;
+    } else {
+        fdt = __dtb_z_spacemit_k1_start + get_runtime_offset();
+    }
 
-	barebox_riscv_machine_entry(0xC0000000, SZ_256M, fdt);
+	barebox_riscv_supervisor_entry(0xC0000000, SZ_256M, a0, fdt);
 }
 
 

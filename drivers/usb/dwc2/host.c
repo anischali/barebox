@@ -127,10 +127,19 @@ static void dwc2_endpoint_reset(struct dwc2 *dwc2, int in, int devnum, int ep)
 		dwc2->out_data_toggle[devnum][ep] = TSIZ_SC_MC_PID_DATA0;
 }
 
+static int dwc2_disconnected(struct dwc2 *dwc2)
+{
+	uint32_t hprt;
+	hprt = dwc2_readl(dwc2, HPRT0);
+	return !(hprt & HPRT0_ENA && hprt & HPRT0_CONNSTS);
+}
+
+
 static int wait_for_chhltd(struct dwc2 *dwc2, u8 hc, uint32_t *sub, u8 *tgl)
 {
 	int ret, retry = 5;
 	uint32_t hcint, hctsiz, hcchar;
+	bool done = false;
 
 	do {
 		hcint = dwc2_readl(dwc2, HCINT(hc));
@@ -141,11 +150,13 @@ static int wait_for_chhltd(struct dwc2 *dwc2, u8 hc, uint32_t *sub, u8 *tgl)
 			
 			dwc2_dbg(dwc2, "%s: HCINT=%08x sub=%u toggle=%d\n", __func__,
 				hcint, *sub, *tgl);
-			return 0;
+			
+			done = true;
 		}
 		
 		udelay(5);
 		ret = dwc2_wait_bit_set(dwc2, HCINT(hc), HCINTMSK_CHHLTD, 10000);
+		hcint = dwc2_readl(dwc2, HCINT(hc));
 		if (ret || hcint & (HCINTMSK_STALL | HCINTMSK_BBLERR)) {
 			hcchar = dwc2_readl(dwc2, HCCHAR(hc));
 			dwc2_writel(dwc2, hcchar | HCCHAR_CHDIS, HCCHAR(hc));
@@ -154,8 +165,14 @@ static int wait_for_chhltd(struct dwc2 *dwc2, u8 hc, uint32_t *sub, u8 *tgl)
 			return ret;
 		}
 
+		if (done)
+			return 0;
+			
 		if (hcint & (HCINTMSK_NAK | HCINTMSK_FRMOVRUN | HCINTMSK_XACTERR))
 			return -EAGAIN;
+		
+		if (dwc2_disconnected(dwc2))
+			return -ENOTCONN;
 
 	} while (retry-- > 0);
 
@@ -287,6 +304,8 @@ static int dwc2_submit_packet(struct dwc2 *dwc2, struct usb_device *dev, u8 hc,
 		ret = transfer_chunk(dwc2, hc, pid,
 				     in, (char *)buf + done, num_packets,
 				     xfer_len, &actual_len, odd_frame);
+		if (ret == -ENOTCONN)
+			goto out;
 
 		hcint = dwc2_readl(dwc2, HCINT(hc));
 		if (complete_split) {
@@ -324,6 +343,10 @@ static int dwc2_submit_packet(struct dwc2 *dwc2, struct usb_device *dev, u8 hc,
 	 * is executed.
 	 */
 	} while (((done < len) && !stop_transfer) || complete_split);
+
+out:
+	if (ret == -ENOTCONN && do_split)
+		dwc2_writel(dwc2, 0, HCSPLT(hc));
 
 	dwc2_writel(dwc2, 0, HCINTMSK(hc));
 	dwc2_writel(dwc2, 0xFFFFFFFF, HCINT(hc));

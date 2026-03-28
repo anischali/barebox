@@ -129,37 +129,37 @@ static void dwc2_endpoint_reset(struct dwc2 *dwc2, int in, int devnum, int ep)
 
 static int wait_for_chhltd(struct dwc2 *dwc2, u8 hc, uint32_t *sub, u8 *tgl)
 {
-	int ret;
+	int ret, retry = 5;
 	uint32_t hcint, hctsiz, hcchar;
 
-	ret = dwc2_wait_bit_set(dwc2, HCINT(hc), HCINTMSK_CHHLTD, 10000);
-	if (ret) {
-		hcchar = dwc2_readl(dwc2, HCCHAR(hc));
-		dwc2_writel(dwc2, hcchar | HCCHAR_CHDIS, HCCHAR(hc));
-		dwc2_wait_bit_set(dwc2, HCINT(hc), HCINTMSK_CHHLTD, 10000);
-		return ret;
-	}
+	do {
+		hcint = dwc2_readl(dwc2, HCINT(hc));
+		if (hcint & (HCINTMSK_XFERCOMPL | HCINTMSK_ACK)) {
+			hctsiz = dwc2_readl(dwc2, HCTSIZ(hc));
+			*sub = (hctsiz & TSIZ_XFERSIZE_MASK) >> TSIZ_XFERSIZE_SHIFT;
+			*tgl = (hctsiz & TSIZ_SC_MC_PID_MASK) >> TSIZ_SC_MC_PID_SHIFT;
+			
+			dwc2_dbg(dwc2, "%s: HCINT=%08x sub=%u toggle=%d\n", __func__,
+				hcint, *sub, *tgl);
+			return 0;
+		}
+		
+		udelay(5);
+		ret = dwc2_wait_bit_set(dwc2, HCINT(hc), HCINTMSK_CHHLTD, 10000);
+		if (ret || hcint & (HCINTMSK_STALL | HCINTMSK_BBLERR)) {
+			hcchar = dwc2_readl(dwc2, HCCHAR(hc));
+			dwc2_writel(dwc2, hcchar | HCCHAR_CHDIS, HCCHAR(hc));
+			udelay(5);
+			ret = dwc2_wait_bit_set(dwc2, HCINT(hc), HCINTMSK_CHHLTD, 10000);
+			return ret;
+		}
 
-	hcint = dwc2_readl(dwc2, HCINT(hc));
+		if (hcint & (HCINTMSK_NAK | HCINTMSK_FRMOVRUN | HCINTMSK_XACTERR))
+			return -EAGAIN;
 
-	if (hcint & HCINTMSK_AHBERR)
-		dwc2_err(dwc2, "%s: AHB error during internal DMA access\n",
-			   __func__);
+	} while (retry-- > 0);
 
-	if (hcint & HCINTMSK_XFERCOMPL) {
-		hctsiz = dwc2_readl(dwc2, HCTSIZ(hc));
-		*sub = (hctsiz & TSIZ_XFERSIZE_MASK) >> TSIZ_XFERSIZE_SHIFT;
-		*tgl = (hctsiz & TSIZ_SC_MC_PID_MASK) >> TSIZ_SC_MC_PID_SHIFT;
-
-		dwc2_dbg(dwc2, "%s: HCINT=%08x sub=%u toggle=%d\n", __func__,
-			 hcint, *sub, *tgl);
-		return 0;
-	}
-
-	if (hcint & (HCINTMSK_NAK | HCINTMSK_FRMOVRUN))
-		return -EAGAIN;
-
-	dwc2_dbg(dwc2, "%s: Unknown channel status: (HCINT=%08x)\n", __func__,
+	pr_err("%s: Unknown channel status: (HCINT=%08x)\n", __func__,
 		 hcint);
 	return -EINVAL;
 }
@@ -168,7 +168,7 @@ static int transfer_chunk(struct dwc2 *dwc2, u8 hc,
 			  u8 *pid, int in, void *buffer, int num_packets,
 			  int xfer_len, int *actual_len, int odd_frame)
 {
-	uint32_t hctsiz, hcchar, sub;
+	uint32_t hctsiz, hcchar, sub = 0;
 	dma_addr_t dma_addr = 0;
 	int ret = 0;
 

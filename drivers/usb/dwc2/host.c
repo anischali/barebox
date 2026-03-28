@@ -153,14 +153,12 @@ static int wait_for_chhltd(struct dwc2 *dwc2, u8 hc, uint32_t *sub, u8 *tgl)
 			
 			done = true;
 		}
-		
-		udelay(5);
+
 		ret = dwc2_wait_bit_set(dwc2, HCINT(hc), HCINTMSK_CHHLTD, 10000);
 		hcint = dwc2_readl(dwc2, HCINT(hc));
 		if (ret || hcint & (HCINTMSK_STALL | HCINTMSK_BBLERR)) {
 			hcchar = dwc2_readl(dwc2, HCCHAR(hc));
 			dwc2_writel(dwc2, hcchar | HCCHAR_CHDIS, HCCHAR(hc));
-			udelay(5);
 			ret = dwc2_wait_bit_set(dwc2, HCINT(hc), HCINTMSK_CHHLTD, 10000);
 			return ret;
 		}
@@ -304,8 +302,10 @@ static int dwc2_submit_packet(struct dwc2 *dwc2, struct usb_device *dev, u8 hc,
 		ret = transfer_chunk(dwc2, hc, pid,
 				     in, (char *)buf + done, num_packets,
 				     xfer_len, &actual_len, odd_frame);
-		if (ret == -ENOTCONN)
+		if (ret == -ENOTCONN) {
+			pr_err("Interface disconnected!\n");
 			goto out;
+		}
 
 		hcint = dwc2_readl(dwc2, HCINT(hc));
 		if (complete_split) {

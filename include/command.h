@@ -55,13 +55,13 @@ struct command *find_cmd(const char *cmd);
 int cmd_export_val(const char *variable, const char *val);
 int execute_command(int argc, char **argv);
 void barebox_cmd_usage(struct command *cmdtp);
-int run_command(const char *cmd);
+__printf(1, 2) int run_command(const char *fmt, ...);
 #else
 static inline struct command *find_cmd(const char *cmd) { return NULL; }
 static inline int execute_command(int argc, char **argv) { return -ENOSYS; }
 static inline void barebox_cmd_usage(struct command *cmdtp) {}
 static inline int cmd_export_val(const char *variable, const char *val) { return -ENOSYS; }
-static inline int run_command(const char *cmd) { return -ENOSYS; }
+static inline __printf(1, 2) int run_command(const char *fmt, ...) { return -ENOSYS; }
 #endif
 
 #define COMMAND_SUCCESS		0
@@ -121,5 +121,14 @@ static const __maybe_unused char cmd_##_name##_help[] =
 #define BAREBOX_CMD_OPTS(text)	.opts = text,
 
 int register_command(struct command *);
+
+#ifdef CONFIG_CMD_BOOTM
+unsigned bootm_command_attempts(void);
+#else
+static inline unsigned bootm_command_attempts(void)
+{
+	return 0;
+}
+#endif
 
 #endif	/* __COMMAND_H */

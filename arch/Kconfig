@@ -47,7 +47,19 @@ config BOARD_GENERIC_FIT
 	  Note that this option requires python3 and its libfdt module to be
 	  installed on the build host.
 
-endmenu
+# Select if the architecture has support for applying RELR relocations.
+config ARCH_HAS_RELR
+	bool
+
+config RELR
+	bool "Use RELR relocation packing"
+	depends on ARCH_HAS_RELR && TOOLS_SUPPORT_RELR
+	default y
+	help
+	  Store the dynamic relocations in the RELR relocation packing
+	  format. Requires a compatible linker (LLD supports this feature), as
+	  well as compatible NM and OBJCOPY utilities (llvm-nm and llvm-objcopy
+	  are compatible).
 
 config ARCH_HAS_CTRLC
 	bool
@@ -131,8 +143,16 @@ config HAVE_ARCH_KASAN
 config ARCH_HAS_UBSAN_SANITIZE_ALL
 	bool
 
+config HAVE_STACKPROTECTOR
+	bool
+	help
+	  An arch should select this symbol if:
+	  - it has implemented a stack canary (e.g. __stack_chk_guard)
+
 config ARCH_HAS_FORTIFY_SOURCE
 	bool
 	help
 	  An architecture should select this when it can successfully
 	  build and run with CONFIG_FORTIFY_SOURCE.
+
+endmenu

@@ -586,6 +586,7 @@ struct resource *dev_request_mem_resource(struct device *dev, int num)
 
 	return dev_request_iomem_resource(dev, res);
 }
+EXPORT_SYMBOL(dev_request_mem_resource);
 
 void __iomem *dev_request_mem_region_err_null(struct device *dev, int num)
 {
@@ -648,8 +649,10 @@ int dev_add_alias(struct device *dev, const char *fmt, ...)
 	va_end(va_copy);
 
 	alias = malloc(struct_size(alias, name, len + 1));
-	if (!alias)
+	if (!alias) {
+		va_end(va);
 		return -ENOMEM;
+	}
 
 	vsnprintf(alias->name, len + 1, fmt, va);
 

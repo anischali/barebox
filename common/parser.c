@@ -6,6 +6,7 @@
 #include <environment.h>
 #include <shell.h>
 #include <security/config.h>
+#include <stdio.h>
 
 /*
  * not yet supported
@@ -180,7 +181,7 @@ static void process_macros (const char *input, char *output)
  * creates or modifies environment variables (like "bootp" does).
  */
 
-int run_command(const char *cmd)
+static int __run_command(const char *cmd)
 {
 	char cmdbuf[CONFIG_CBSIZE];	/* working copy of cmd		*/
 	char *token;			/* start of token in cmdbuf	*/
@@ -266,6 +267,23 @@ int run_command(const char *cmd)
 	return rc;
 }
 
+int run_command(const char *fmt, ...)
+{
+	va_list vargs;
+	char *cmd;
+	int error;
+
+	va_start(vargs, fmt);
+	cmd = xvasprintf(fmt, vargs);
+	va_end(vargs);
+
+	error = __run_command(cmd);
+
+	free(cmd);
+
+	return error;
+}
+
 static char console_buffer[CONFIG_CBSIZE];		/* console I/O buffer	*/
 
 int run_shell(void)
@@ -287,7 +305,7 @@ int run_shell(void)
 		if (len == -1) {
 			puts ("<INTERRUPT>\n");
 		} else {
-			const int rc = run_command(lastcommand);
+			const int rc = run_command("%s", lastcommand);
 			if (rc < 0) {
 				/* invalid command or not repeatable, forget it */
 				lastcommand[0] = 0;

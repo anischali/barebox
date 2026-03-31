@@ -53,6 +53,7 @@ policy-list
 /tags
 /TAGS
 /barebox*
+/vmbarebox
 /System.map
 /build
 /oe-logs
@@ -112,3 +113,10 @@ default.profdata
 default.profraw
 coverage.info
 coverage_html/
+
+# Disk images (used for testing)
+/*.raw
+/*.qcow2
+
+# Labgrid default console log file
+/console_main

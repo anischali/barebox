@@ -55,18 +55,6 @@ static char *dt_string(struct fdt_header *f, char *strstart, uint32_t ofs)
 		return strstart + ofs;
 }
 
-static int of_read_string_list(struct device_node *np, const char *name, struct string_list *sl)
-{
-	struct property *prop;
-	const char *s;
-
-	of_property_for_each_string(np, name, prop, s) {
-		string_list_add(sl, s);
-	}
-
-	return prop ? 0 : -EINVAL;
-}
-
 static int fit_digest(struct fit_handle *handle, struct digest *digest,
 		      struct string_list *inc_nodes, struct string_list *exc_props,
 		      uint32_t hashed_strings_start, uint32_t hashed_strings_size)
@@ -153,6 +141,8 @@ static int fit_digest(struct fit_handle *handle, struct digest *digest,
 		case FDT_END_NODE:
 			dt_struct = dt_struct_advance(&f, dt_struct, FDT_TAGSIZE);
 
+			if (depth < 0)
+				return -ESPIPE;
 			include = want;
 			want = stack[depth--];
 			while (end > path && *--end != '/')
@@ -314,10 +304,97 @@ ok:
 	return 0;
 }
 
+static int fit_config_build_hash_nodes(struct fit_handle *handle,
+				       struct device_node *conf_node,
+				       struct string_list *node_list)
+{
+	struct device_node *image_node, *child;
+	struct property *prop;
+	const char *unit;
+	int i, ret, count;
+
+	ret = string_list_add(node_list, "/");
+	if (ret)
+		return ret;
+	ret = string_list_add_asprintf(node_list, "%s", conf_node->full_name);
+	if (ret)
+		return ret;
+
+	for_each_property_of_node(conf_node, prop) {
+		if (!strcmp(prop->name, "description") ||
+		    !strcmp(prop->name, "compatible") ||
+		    !strcmp(prop->name, "default"))
+			continue;
+
+		count = of_property_count_strings(conf_node, prop->name);
+		for (i = 0; i < count; i++) {
+			if (of_property_read_string_index(conf_node, prop->name,
+							  i, &unit))
+				return -EINVAL;
+
+			if (strchr(unit, '/'))
+				return -EINVAL;
+
+			ret = string_list_add_asprintf(node_list, "/images/%s", unit);
+			if (ret)
+				return ret;
+
+			image_node = of_get_child_by_name(handle->images, unit);
+			if (!image_node)
+				return -EINVAL;
+
+			for_each_child_of_node(image_node, child) {
+				if (!of_node_has_prefix(child, "hash"))
+					continue;
+				ret = string_list_add_asprintf(node_list, "/images/%s/%s",
+							       unit, child->name);
+				if (ret)
+					return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * fit_config_check_hash_nodes - Sanity check hashed-nodes
+ * @sig_node: Signature node of a FIT configuration
+ * @inc_nodes: String list of nodes included in the hash
+ *
+ * Check if the informational hashed-nodes property is cosistent with
+ * the list of nodes to hash that we calculated.
+ *
+ * We only do this if hash verification failed, so we can present a better
+ * error messages in some circumstances.
+ */
+static void fit_config_check_hash_nodes(struct device_node *sig_node,
+					struct string_list *inc_nodes)
+{
+	struct string_list *entry;
+	int ret, i = 0;
+
+	string_list_for_each_entry(entry, inc_nodes) {
+		ret = of_property_match_string(sig_node, "hashed-nodes", entry->str);
+		if (ret < 0)
+			pr_err("%pOF/hashed-nodes: '%s' is missing\n", sig_node,
+			       entry->str);
+
+		i++;
+	}
+
+	ret = of_property_count_strings(sig_node, "hashed-nodes");
+	if (ret != i)
+		pr_err("hashed-nodes property has more entries than calculated: %d != %d\n",
+		       ret, i);
+}
+
 /*
  * The consistency of the FTD structure was already checked by of_unflatten_dtb()
  */
-static int fit_verify_signature(struct fit_handle *handle, struct device_node *sig_node)
+static int fit_verify_signature(struct fit_handle *handle,
+				struct device_node *sig_node,
+				struct device_node *conf_node)
 {
 	uint32_t hashed_strings_start, hashed_strings_size;
 	struct string_list inc_nodes, exc_props;
@@ -331,6 +408,7 @@ static int fit_verify_signature(struct fit_handle *handle, struct device_node *s
 		pr_err("hashed-strings start not found in %pOF\n", sig_node);
 		return -EINVAL;
 	}
+
 	if (of_property_read_u32_index(sig_node, "hashed-strings", 1,
 	    &hashed_strings_size)) {
 		pr_err("hashed-strings size not found in %pOF\n", sig_node);
@@ -340,9 +418,9 @@ static int fit_verify_signature(struct fit_handle *handle, struct device_node *s
 	string_list_init(&inc_nodes);
 	string_list_init(&exc_props);
 
-	if (of_read_string_list(sig_node, "hashed-nodes", &inc_nodes)) {
-		pr_err("hashed-nodes property not found in %pOF\n", sig_node);
-		ret = -EINVAL;
+	ret = fit_config_build_hash_nodes(handle, conf_node, &inc_nodes);
+	if (ret) {
+		pr_err("Failed to build hash node list for %pOF\n", conf_node);
 		goto out_sl;
 	}
 
@@ -363,8 +441,10 @@ static int fit_verify_signature(struct fit_handle *handle, struct device_node *s
 	digest_final(digest, hash);
 
 	ret = fit_check_signature(handle, sig_node, algo, hash);
-	if (ret)
+	if (ret) {
+		fit_config_check_hash_nodes(sig_node, &inc_nodes);
 		goto out_free_hash;
+	}
 
 	ret = 0;
 
@@ -495,19 +575,15 @@ static int fit_image_verify_signature(struct fit_handle *handle,
 	return ret;
 }
 
-bool fit_has_image(struct fit_handle *handle, void *configuration,
-		   const char *name)
+int fit_count_images(struct fit_handle *handle, void *configuration,
+		     const char *name)
 {
-	const char *unit;
 	struct device_node *conf_node = configuration;
 
 	if (!conf_node)
-		return false;
+		return -EINVAL;
 
-	if (of_property_read_string(conf_node, name, &unit))
-		return false;
-
-	return true;
+	return of_property_count_strings(conf_node, name);
 }
 
 static int fit_get_address(struct device_node *image, const char *property,
@@ -526,24 +602,20 @@ static int fit_get_address(struct device_node *image, const char *property,
 	return 0;
 }
 
-static int
+static struct device_node *
 fit_get_image(struct fit_handle *handle, void *configuration,
-	      const char **unit, struct device_node **image)
+	      const char **unit, int idx)
 {
 	struct device_node *conf_node = configuration;
 
 	if (conf_node) {
-		if (of_property_read_string(conf_node, *unit, unit)) {
+		if (of_property_read_string_index(conf_node, *unit, idx, unit)) {
 			pr_err("No image named '%s'\n", *unit);
-			return -ENOENT;
+			return NULL;
 		}
 	}
 
-	*image = of_get_child_by_name(handle->images, *unit);
-	if (!*image)
-		return -ENOENT;
-
-	return 0;
+	return of_get_child_by_name(handle->images, *unit);
 }
 
 /**
@@ -573,9 +645,9 @@ int fit_get_image_address(struct fit_handle *handle, void *configuration,
 	if (!address || !property || !name)
 		return -EINVAL;
 
-	ret = fit_get_image(handle, configuration, &unit, &image);
-	if (ret)
-		return ret;
+	image = fit_get_image(handle, configuration, &unit, 0);
+	if (!image)
+		return -ENOENT;
 
 	/* Treat type = "kernel_noload" as if entry/load address is missing */
 	ret = of_property_read_string(image, "type", &type);
@@ -651,22 +723,22 @@ static int fit_handle_decompression(struct device_node *image,
 /**
  * fit_open_image - Open an image in a FIT image
  * @handle: The FIT image handle
+ * @configuration: configuration cookie from fit_open_configuration(), or NULL
  * @name: The name of the image to open
+ * @idx: The index of image to open (for multi-image properties like overlays)
  * @outdata: The returned image
  * @outsize: Size of the returned image
  *
  * Open an image in a FIT image. The returned image is freed during fit_close().
- * @configuration holds the cookie returned from fit_open_configuration() if
- * the image is opened as part of a configuration, or NULL if the image is
- * opened without a configuration. If @configuration is NULL then the RSA
- * signature of the image is checked if desired, if @configuration is non NULL,
- * then only the hash is checked (because opening the configuration already
- * checks the RSA signature of all involved nodes).
+ *
+ * If @configuration is NULL then the RSA signature of the image is checked
+ * if desired; otherwise only the hash is checked (because opening the
+ * configuration already checks the RSA signature of all involved nodes).
  *
  * Return: 0 for success, negative error code otherwise
  */
 int fit_open_image(struct fit_handle *handle, void *configuration,
-		   const char *name, const void **outdata,
+		   const char *name, int idx, const void **outdata,
 		   unsigned long *outsize)
 {
 	struct device_node *image;
@@ -675,9 +747,9 @@ int fit_open_image(struct fit_handle *handle, void *configuration,
 	int data_len;
 	int ret = 0;
 
-	ret = fit_get_image(handle, configuration, &unit, &image);
-	if (ret)
-		return ret;
+	image = fit_get_image(handle, configuration, &unit, idx);
+	if (!image)
+		return -ENOENT;
 
 	of_property_read_string(image, "description", &desc);
 	if (handle->verbose)
@@ -740,7 +812,7 @@ int fit_config_verify_signature(struct fit_handle *handle, struct device_node *c
 		if (handle->verbose)
 			of_print_nodes(sig_node, 0, ~0);
 
-		ret = fit_verify_signature(handle, sig_node);
+		ret = fit_verify_signature(handle, sig_node, conf_node);
 		if (ret < 0)
 			return ret;
 	}
@@ -769,9 +841,11 @@ static int fit_fdt_is_compatible(struct fit_handle *handle,
 	if (!of_property_present(child, "fdt"))
 		return 0;
 
-	ret = fit_get_image(handle, child, &unit, &image);
-	if (ret)
+	image = fit_get_image(handle, child, &unit, 0);
+	if (!image) {
+		ret = -ENOENT;
 		goto err;
+	}
 
 	data = of_get_property(image, "data", &data_len);
 	if (!data)
@@ -860,7 +934,7 @@ static int fit_find_last_unit(struct fit_handle *handle,
 	const char *unit = NULL;
 
 	if (!conf_node)
-		return 0;
+		return -ENOENT;
 
 	for_each_child_of_node(conf_node, child)
 		unit = child->name;
@@ -998,7 +1072,6 @@ struct fit_handle *fit_open_buf(const void *buf, size_t size, bool verbose,
  * @filename:	The filename of the FIT image
  * @verbose:	If true, be more verbose
  * @verify:	The verify mode
- * @max_size:	maximum length to read from file
  *
  * This opens a FIT image found in @filename. The returned handle is used as
  * context for the other FIT functions.
@@ -1006,11 +1079,12 @@ struct fit_handle *fit_open_buf(const void *buf, size_t size, bool verbose,
  * Return: A handle to a FIT image or a ERR_PTR
  */
 struct fit_handle *fit_open(const char *_filename, bool verbose,
-			    enum bootm_verify verify, loff_t max_size)
+			    enum bootm_verify verify)
 {
 	struct fit_handle *handle;
+	ssize_t nbytes;
 	char *filename;
-	int ret;
+	int fd, ret;
 
 	filename = canonicalize_path(AT_FDCWD, _filename);
 	if (!filename) {
@@ -1020,6 +1094,7 @@ struct fit_handle *fit_open(const char *_filename, bool verbose,
 
 	handle = fit_get_handle(filename);
 	if (handle) {
+		free(filename);
 		refcount_inc(&handle->users);
 		return handle;
 	}
@@ -1029,14 +1104,29 @@ struct fit_handle *fit_open(const char *_filename, bool verbose,
 	handle->verbose = verbose;
 	handle->verify = verify;
 
-	ret = read_file_2(filename, &handle->size, &handle->fit_alloc,
-			  max_size);
-	if (ret && ret != -EFBIG) {
-		pr_err("unable to read %s: %pe\n", filename, ERR_PTR(ret));
-		free(handle);
-		free(filename);
-		return ERR_PTR(ret);
+	fd = open_fdt(filename, &handle->size);
+	if (fd < 0) {
+		ret = fd;
+		goto free_handle;
 	}
+
+	handle->fit_alloc = malloc(handle->size);
+	if (!handle->fit_alloc) {
+		ret = -ENOMEM;
+		goto close_fd;
+	}
+
+	nbytes = read_full(fd, handle->fit_alloc, handle->size);
+	if (nbytes < 0) {
+		ret = nbytes;
+		goto free_fit_alloc;
+	}
+	if (handle->size != nbytes) {
+		ret = -ENODATA;
+		goto free_fit_alloc;
+	}
+
+	close(fd);
 
 	handle->fit = handle->fit_alloc;
 	handle->filename = filename;
@@ -1051,12 +1141,23 @@ struct fit_handle *fit_open(const char *_filename, bool verbose,
 	}
 
 	return handle;
+
+free_fit_alloc:
+	free(handle->fit_alloc);
+close_fd:
+	close(fd);
+free_handle:
+	pr_err("unable to read %s: %pe\n", filename, ERR_PTR(ret));
+	free(filename);
+	free(handle);
+	return ERR_PTR(ret);
+
 }
 
-static void __fit_close(struct fit_handle *handle)
+static bool __fit_close(struct fit_handle *handle)
 {
 	if (!refcount_dec_and_test(&handle->users))
-		return;
+		return false;
 
 	if (handle->root)
 		of_delete_node(handle->root);
@@ -1066,12 +1167,13 @@ static void __fit_close(struct fit_handle *handle)
 
 	free(handle->filename);
 	free(handle->fit_alloc);
+	return true;
 }
 
 void fit_close(struct fit_handle *handle)
 {
-	__fit_close(handle);
-	free(handle);
+	if (__fit_close(handle))
+		free(handle);
 }
 
 static int do_bootm_fit(struct image_data *data)
@@ -1081,10 +1183,19 @@ static int do_bootm_fit(struct image_data *data)
 	return -EINVAL;
 }
 
+static bool fitimage_check(struct image_handler *handler,
+			   struct image_data *data,
+			   enum filetype detected_filetype)
+{
+	return detected_filetype == filetype_oftree ||
+		detected_filetype == filetype_fit;
+}
+
 static struct image_handler fit_handler = {
 	.name = "FIT image",
 	.bootm = do_bootm_fit,
-	.filetype = filetype_oftree,
+	.filetype = filetype_fit,
+	.check_image = fitimage_check,
 };
 
 static int bootm_fit_register(void)
@@ -1109,6 +1220,8 @@ static int fuzz_fit(const u8 *data, size_t size)
 	handle.fit = data;
 	handle.fit_alloc = NULL;
 
+	refcount_set(&handle.users, 1);
+
 	ret = fit_do_open(&handle);
 	if (ret)
 		goto out;
@@ -1125,14 +1238,14 @@ static int fuzz_fit(const u8 *data, size_t size)
 		goto out;
 	}
 
-	ret = fit_open_image(&handle, config, imgname, &outdata, &outsize);
+	ret = fit_open_image(&handle, config, imgname, 0, &outdata, &outsize);
 	if (ret)
 		goto out;
 
 	fit_get_image_address(&handle, config, imgname, "load", &addr);
 	fit_get_image_address(&handle, config, imgname, "entry", &addr);
 
-	ret = fit_open_image(&handle, NULL, imgname, &outdata, &outsize);
+	ret = fit_open_image(&handle, NULL, imgname, 0, &outdata, &outsize);
 out:
 	__fit_close(&handle);
 

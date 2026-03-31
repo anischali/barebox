@@ -76,6 +76,9 @@ def guess_lg_env():
     return None
 
 
+lg_env = lg_builddir = None
+
+
 def pytest_configure(config):
     if 'LG_BUILDDIR' not in os.environ:
         if 'KBUILD_OUTPUT' in os.environ:
@@ -88,12 +91,25 @@ def pytest_configure(config):
     if os.environ['LG_BUILDDIR'] is not None:
         os.environ['LG_BUILDDIR'] = os.path.realpath(os.environ['LG_BUILDDIR'])
 
+    global lg_env
+    global lg_builddir
+
+    lg_builddir = os.environ['LG_BUILDDIR']
     lg_env = config.option.lg_env
     if lg_env is None:
         lg_env = os.environ.get('LG_ENV')
     if lg_env is None:
         if lg_env := guess_lg_env():
             os.environ['LG_ENV'] = lg_env
+
+
+def pytest_report_header(config):
+    report = []
+    if lg_builddir is not None:
+        report += [f"Build diectory: {lg_builddir}"]
+    if lg_env is not None:
+        report += [f"Labgrid Environment: {lg_env}"]
+    return "\n".join(report)
 
 
 def pytest_addoption(parser):
@@ -142,6 +158,12 @@ def strategy(request, target, pytestconfig):  # noqa: max-complexity=30
         features = main["features"]
     except KeyError:
         features = []
+
+    try:
+        main = target.env.config.data["targets"]["main"]
+        yaml_env = main["env"]
+    except KeyError:
+        yaml_env = {}
 
     try:
         main = target.env.config.data["targets"]["main"]
@@ -218,6 +240,19 @@ def strategy(request, target, pytestconfig):  # noqa: max-complexity=30
         else:
             pytest.exit("--env unsupported for target\n", 1)
 
+    for envpath, value in yaml_env.items():
+        if virtio:
+            if value.startswith('@'):
+                source = f"file='{value[1:]}'"
+            else:
+                source = f"string='{value}'"
+
+            strategy.append_qemu_args(
+                '-fw_cfg', f'name=opt/org.barebox.env/{envpath},{source}'
+            )
+        else:
+            pytest.exit("env unsupported for target\n", 1)
+
     if len(pytestconfig.option.bootarg) > 0:
         strategy.append_qemu_bootargs(pytestconfig.option.bootarg)
 
@@ -229,6 +264,7 @@ def strategy(request, target, pytestconfig):  # noqa: max-complexity=30
             testfs_path = os.path.join(os.environ["LG_BUILDDIR"], "testfs")
             pytestconfig.option.qemu_fs.append(["testfs", testfs_path])
             os.makedirs(testfs_path, exist_ok=True)
+            strategy.append_qemu_args("-nic", f"user,id=net0,tftp={testfs_path}")
 
     for i, fs in enumerate(pytestconfig.option.qemu_fs):
         if virtio:
@@ -236,7 +272,7 @@ def strategy(request, target, pytestconfig):  # noqa: max-complexity=30
             tag = fs.pop() if fs else f"fs{i}"
 
             strategy.append_qemu_args(
-                "-fsdev", f"local,security_model=mapped,id=fs{i},path={path}",
+                "-fsdev", f"local,security_model=none,id=fs{i},path={path}",
                 "-device", f"virtio-9p-{virtio},id=fs{i},fsdev=fs{i},mount_tag={tag}"
             )
         else:

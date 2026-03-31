@@ -17,6 +17,8 @@ int rockchip_soc(void)
 		__rockchip_soc = 3188;
 	else if (of_machine_is_compatible("rockchip,rk3288"))
 		__rockchip_soc = 3288;
+	else if (of_machine_is_compatible("rockchip,rk3562"))
+		__rockchip_soc = 3562;
 	else if (of_machine_is_compatible("rockchip,rk3566"))
 		__rockchip_soc = 3566;
 	else if (of_machine_is_compatible("rockchip,rk3568"))
@@ -33,7 +35,8 @@ static int rockchip_init(void)
 {
 	const struct optee_header *hdr = rk_scratch_get_optee_hdr();
 
-	if (IS_ENABLED(CONFIG_PBL_OPTEE) && optee_verify_header(hdr) == 0) {
+	if (IS_ENABLED(CONFIG_PBL_OPTEE) && !optee_overlay_registered() &&
+	    optee_verify_header(hdr) == 0) {
 		static struct of_optee_fixup_data optee_fixup_data = {
 			.shm_size = OPTEE_SHM_SIZE,
 			.method = "smc",
@@ -49,6 +52,8 @@ static int rockchip_init(void)
 		return rk3188_init();
 	case 3288:
 		return rk3288_init();
+	case 3562:
+		return rk3562_init();
 	case 3566:
 		return rk3568_init();
 	case 3568:

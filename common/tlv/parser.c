@@ -165,7 +165,7 @@ struct tlv_device *tlv_register_device_by_path(const char *path, struct device *
 	if (IS_ERR(header))
 		return ERR_CAST(header);
 
-	tlvdev = tlv_register_device(header, parent);
+	tlvdev = tlv_register_device(header, size, parent);
 	if (IS_ERR(tlvdev))
 		free(header);
 
@@ -186,6 +186,11 @@ int of_tlv_fixup(struct device_node *root, void *ctx)
 	ethaddrs = of_get_child_by_name(conf, "ethernet-address");
 	if (!ethaddrs)
 		return 0;
+
+	if (!IS_ENABLED(CONFIG_NET)) {
+		pr_warn("CONFIG_NET disabled, so skipping ethernet-address trimming in fixup\n");
+		return 0;
+	}
 
 	list_for_each_entry(addr, &ethaddr_list, list) {
 		char propname[sizeof("address-4294967295")];

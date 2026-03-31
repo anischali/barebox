@@ -96,6 +96,8 @@ static struct efi_boot *efi_get_boot(int num)
 
 	printf("path: %s\n", device_path_to_str(boot->path, true));
 
+	free(buf);
+
 	return boot;
 }
 
@@ -301,8 +303,10 @@ static int efi_late_init(void)
 	}
 
 	state_root = of_unflatten_dtb(fdt, size);
+	free(fdt);
+
 	if (!IS_ERR(state_root)) {
-		struct device_node *np = NULL;
+		struct device_node *np;
 		struct state *state;
 
 		ret = barebox_register_of(state_root);
@@ -310,13 +314,17 @@ static int efi_late_init(void)
 			pr_warn("Failed to register device-tree: %pe\n", ERR_PTR(ret));
 
 		np = of_find_node_by_alias(state_root, "state");
+		if (!np) {
+			pr_warn("No state alias in %s\n", state_desc);
+			return 0;
+		}
 
 		state = state_new_from_node(np, false);
 		if (IS_ERR(state))
 			return PTR_ERR(state);
 
 		ret = state_load(state);
-		if (ret != -ENOMEDIUM)
+		if (ret && ret != -ENOMEDIUM)
 			pr_warn("Failed to load persistent state, continuing with defaults, %d\n",
 				ret);
 

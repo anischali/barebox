@@ -26,6 +26,21 @@ int bootentries_add_entry(struct bootentries *entries, struct bootentry *entry)
 	return 0;
 }
 
+#define BOOTENTRIES(name) \
+	struct bootentries name = { .entries = LIST_HEAD_INIT(name.entries) }
+
+static inline void bootentries_merge(struct bootentries *dst, struct bootentries *src)
+{
+	list_splice_tail_init(&src->entries, &dst->entries);
+}
+
+void bootentries_add_entry_sorted(struct bootentries *entries, struct bootentry *entry,
+				  int (*compare)(struct list_head *, struct list_head *))
+
+{
+	list_add_sort(&entry->list, &entries->entries, compare);
+}
+
 struct bootentries *bootentries_alloc(void)
 {
 	struct bootentries *bootentries;
@@ -49,6 +64,7 @@ void bootentries_free(struct bootentries *bootentries)
 		list_del(&be->list);
 		free_const(be->title);
 		free(be->description);
+		free_const(be->path);
 		free_const(be->me.display);
 		be->release(be);
 	}
@@ -66,7 +82,6 @@ void bootentries_free(struct bootentries *bootentries)
 
 struct bootentry_script {
 	struct bootentry entry;
-	const char *scriptpath;
 };
 
 /*
@@ -75,12 +90,13 @@ struct bootentry_script {
 static int bootscript_boot(struct bootentry *entry, int verbose, int dryrun)
 {
 	struct bootentry_script *bs = container_of(entry, struct bootentry_script, entry);
+	int bootm_nattempts;
 	int ret;
 
 	struct bootm_data backup = {}, data = {};
 
 	if (dryrun == 1) {
-		printf("Would run %s\n", bs->scriptpath);
+		printf("Would run %s\n", bs->entry.path);
 		return 0;
 	}
 
@@ -89,11 +105,17 @@ static int bootscript_boot(struct bootentry *entry, int verbose, int dryrun)
 	globalvar_add_simple("linux.bootargs.dyn.ip", NULL);
 	globalvar_add_simple("linux.bootargs.dyn.root", NULL);
 
-	ret = run_command(bs->scriptpath);
+	bootm_nattempts = bootm_command_attempts();
+
+	ret = run_command("%s", bs->entry.path);
 	if (ret) {
-		pr_err("Running script '%s' failed: %pe\n", bs->scriptpath, ERR_PTR(ret));
+		pr_err("Running script '%s' failed: %s\n", bs->entry.path, strerror(-ret));
 		goto out;
 	}
+
+	/* No point in repeating bootm if script already called it */
+	if (bootm_nattempts != bootm_command_attempts())
+		goto out;
 
 	bootm_data_init_defaults(&data);
 
@@ -138,9 +160,10 @@ static int init_boot(void)
 		global_boot_default = xstrdup(
 			IF_ENABLED(CONFIG_EFI_LOADER_BOOTMGR,  "efibootmgr ")
 			IF_ENABLED(CONFIG_BOOT_DEFAULTS,       "bootsource ")
-			IF_ENABLED(CONFIG_BOOT_DEFAULTS,       "storage.builtin ")
-			IF_ENABLED(CONFIG_BOOT_DEFAULTS,       "storage.removable ")
-			"net"
+			IF_ENABLED(CONFIG_BOOT_DEFAULTS,       "storage.builtin.nonbootsource ")
+			IF_ENABLED(CONFIG_BOOT_DEFAULTS,       "storage.removable.nonbootsource ")
+			IF_ENABLED(CONFIG_NET,                 "net")
+			""
 		);
 
 	globalvar_add_simple_string("boot.default", &global_boot_default);
@@ -174,13 +197,13 @@ int boot_entry(struct bootentry *be, int verbose, int dryrun)
 		}
 	}
 
-	old = bootm_set_overrides(be->overrides);
+	old = bootm_save_overrides(be->overrides);
 
 	ret = be->boot(be, verbose, dryrun);
 	if (ret && ret != -ENOMEDIUM)
 		pr_err("Booting entry '%s' failed: %pe\n", be->title, ERR_PTR(ret));
 
-	bootm_set_overrides(old);
+	bootm_restore_overrides(old);
 
 	globalvar_set_match("linux.bootargs.dyn.", "");
 
@@ -200,10 +223,7 @@ static void bootsource_action(struct menu *m, struct menu_entry *me)
 
 static void bootscript_entry_release(struct bootentry *entry)
 {
-	struct bootentry_script *bs = container_of(entry, struct bootentry_script, entry);
-
-	free_const(bs->scriptpath);
-	free(bs);
+	free(entry);
 }
 
 /*
@@ -226,8 +246,8 @@ static int bootscript_create_entry(struct bootentries *bootentries, const char *
 	bs->entry.me.type = MENU_ENTRY_NORMAL;
 	bs->entry.release = bootscript_entry_release;
 	bs->entry.boot = bootscript_boot;
-	bs->scriptpath = xstrdup_const(name);
-	bs->entry.title = xstrdup_const(kbasename(bs->scriptpath));
+	bs->entry.path = xstrdup_const(name);
+	bs->entry.title = xstrdup_const(kbasename(bs->entry.path));
 	bs->entry.description = basprintf("script: %s", name);
 	bootentries_add_entry(bootentries, &bs->entry);
 
@@ -445,9 +465,17 @@ int bootentry_create_from_name(struct bootentries *bootentries,
 		name = nfspath;
 
 	list_for_each_entry(p, &bootentry_providers, list) {
-		ret = p->generate(bootentries, name);
+		BOOTENTRIES(provider_bootentries);
+
+		ret = p->generate(&provider_bootentries, name);
 		if (ret > 0)
 			found += ret;
+
+		/* We want to allow for providers to sort their bootentries as
+		 * they see fit, so they are passed an empty list above with
+		 * only their own entries and then we aggregate here
+		 */
+		bootentries_merge(bootentries, &provider_bootentries);
 	}
 
 	free(nfspath);

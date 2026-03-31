@@ -124,15 +124,20 @@ done:
  */
 static efi_status_t efi_install_fdt(void *fdt)
 {
+	const struct fdt_header *hdr = fdt;
 	/*
 	 * The EBBR spec requires that we have either an FDT or an ACPI table
 	 * but not both.
 	 */
 	efi_status_t ret;
 
-	/* Install device tree */
-	if (fdt_check_header(fdt)) {
-		pr_err("invalid device tree\n");
+	if (hdr->magic != cpu_to_fdt32(FDT_MAGIC)) {
+		pr_err("bad magic: 0x%08x\n", fdt32_to_cpu(hdr->magic));
+		return EFI_LOAD_ERROR;
+	}
+
+	if (hdr->version != cpu_to_fdt32(17)) {
+		pr_err("bad dt version: 0x%08x\n", fdt32_to_cpu(hdr->version));
 		return EFI_LOAD_ERROR;
 	}
 
@@ -155,18 +160,15 @@ static efi_status_t efi_install_fdt(void *fdt)
 
 /**
  * efi_install_initrd() - install initrd
- *
- * Install the initrd located at @initrd using the EFI_LOAD_FILE2
- * protocol.
- *
- * @initrd:	address of initrd or NULL if none is provided
- * @initrd_sz:	size of initrd
+ * @data:	image data
+ * @freemem:	address of free memory usable for placing initrd
  * Return:	status code
  */
 static efi_status_t efi_install_initrd(struct image_data *data,
-				       struct resource *source)
+				       resource_size_t freemem)
 {
-	const struct resource *initrd_res;
+	const struct resource *initrd_res, *sdram;
+	struct resource gap;
 	unsigned long initrd_start;
 
 	if (!IS_ENABLED(CONFIG_BOOTM_INITRD))
@@ -175,13 +177,17 @@ static efi_status_t efi_install_initrd(struct image_data *data,
 	if (UIMAGE_IS_ADDRESS_VALID(data->initrd_address))
 		initrd_start = data->initrd_address;
 	else
-		initrd_start = EFI_PAGE_ALIGN(source->end + 1);
+		initrd_start = EFI_PAGE_ALIGN(freemem);
 
-	initrd_res = bootm_load_initrd(data, initrd_start);
+	sdram = memory_bank_lookup_region(initrd_start, &gap);
+	if (sdram != &gap)
+		return sdram ? EFI_OUT_OF_RESOURCES : EFI_INVALID_PARAMETER;
+
+	initrd_res = bootm_load_initrd(data, initrd_start, gap.end);
 	if (IS_ERR(initrd_res))
 		return PTR_ERR(initrd_res);
 	if (initrd_res)
-		efi_initrd_register((void *)initrd_res->start,
+		efi_initrd_register((const void *)initrd_res->start,
 				    resource_size(initrd_res));
 
 	return EFI_SUCCESS;
@@ -189,12 +195,12 @@ static efi_status_t efi_install_initrd(struct image_data *data,
 
 static int efi_loader_bootm(struct image_data *data)
 {
+	const struct resource *os_res;
 	resource_size_t start, end;
 	void *load_option = NULL;
 	u32 load_option_size = 0;
 	efi_handle_t handle;
 	struct efi_device_path *file_path = NULL;
-	struct resource *source;
 	struct efi_event *evt;
 	size_t exit_data_size = 0;
 	u16 *exit_data = NULL;
@@ -204,13 +210,12 @@ static int efi_loader_bootm(struct image_data *data)
 	int flags = 0;
 
 	memory_bank_first_find_space(&start, &end);
-	data->os_address = start;
 
-	source = file_to_sdram(data->os_file, data->os_address, MEMTYPE_LOADER_CODE);
-	if (!source)
-		return -EINVAL;
+	os_res = bootm_load_os(data, start, end);
+	if (IS_ERR(os_res))
+		return PTR_ERR(os_res);
 
-	if (filetype_is_linux_efi_image(data->os_type)) {
+	if (filetype_is_linux_efi_image(data->kernel_type)) {
 		const char *options;
 
 		options = linux_bootargs_get();
@@ -228,22 +233,24 @@ static int efi_loader_bootm(struct image_data *data)
 	efiret = efi_init_obj_list();
 	if (efiret) {
 		pr_err("Cannot initialize UEFI sub-system: %pe\n",
-			ERR_PTR(-efi_errno(ret)));
+			ERR_PTR(-efi_errno(efiret)));
 		goto out;
 	}
 
 	ret = -EINVAL;
 
 	fdt = bootm_get_devicetree(data);
-	if (IS_ERR(fdt))
-		return PTR_ERR(fdt);
+	if (IS_ERR(fdt)) {
+		ret = PTR_ERR(fdt);
+		goto out;
+	}
 	if (fdt) {
 		ret = efi_install_fdt(fdt);
 		if (ret)
-			return ret;
+			goto out;
 	}
 
-	efiret = efi_install_initrd(data, source);
+	efiret = efi_install_initrd(data, os_res->end + 1);
 	if(efiret != EFI_SUCCESS)
 		goto out;
 
@@ -253,8 +260,8 @@ static int efi_loader_bootm(struct image_data *data)
 		flags |= EFI_DRYRUN;
 
 	efiret = efiloader_load_image(false, efi_root, file_path,
-				(void *)source->start,
-				resource_size(source), &handle);
+				(void *)os_res->start,
+				resource_size(os_res), &handle);
 	if (efiret != EFI_SUCCESS) {
 		pr_err("Loading image failed\n");
 		goto out;
@@ -275,17 +282,17 @@ static int efi_loader_bootm(struct image_data *data)
 	 * Unified Extensible Firmware Interface (UEFI), version 2.7 Errata A
 	 * 7.5. Miscellaneous Boot Services - EFI_BOOT_SERVICES.SetWatchdogTimer
 	 */
-	ret = efi_set_watchdog(300);
-	if (ret != EFI_SUCCESS) {
+	efiret = efi_set_watchdog(300);
+	if (efiret != EFI_SUCCESS) {
 		pr_err("failed to set watchdog timer\n");
 		goto out;
 	}
 
 	/* Call our payload! */
-	ret = __efi_start_image(handle, &exit_data_size, &exit_data, flags);
-	if (ret != EFI_SUCCESS) {
+	efiret = __efi_start_image(handle, &exit_data_size, &exit_data, flags);
+	if (efiret != EFI_SUCCESS) {
 		pr_err("## Application failed, r = %lu\n",
-			ret & ~EFI_ERROR_MASK);
+			efiret & ~EFI_ERROR_MASK);
 		if (exit_data) {
 			pr_err("## %ls\n", exit_data);
 			efi_free_pool(exit_data);
@@ -306,14 +313,13 @@ static int efi_loader_bootm(struct image_data *data)
 	/* Control is returned to us, disable EFI watchdog */
 	efi_set_watchdog(0);
 
-	return ret;
+	return -efi_errno(efiret);
 
 out:
 	efi_initrd_unregister();
 	efi_install_configuration_table(&efi_fdt_guid, NULL);
 	efi_free_pool(file_path);
 	free(load_option);
-	release_sdram_region(source);
 
 	return ret ?: -efi_errno(efiret);
 }

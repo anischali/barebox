@@ -351,6 +351,9 @@ int of_overlay_apply_dtbo(struct device_node *root, const void *dtbo)
 	int ret;
 
 	overlay = of_unflatten_dtb(dtbo, INT_MAX);
+	if (IS_ERR(overlay))
+		return PTR_ERR(overlay);
+
 	ret = of_overlay_apply_tree(root, overlay);
 	of_delete_node(overlay);
 
@@ -487,7 +490,7 @@ static int of_overlay_apply_fit(struct device_node *root, struct fit_handle *fit
 	if (!of_overlay_matches_filter(name, NULL))
 		return 0;
 
-	ret = fit_open_image(fit, config, "fdt", &ovl, &ovl_sz);
+	ret = fit_open_image(fit, config, "fdt", 0, &ovl, &ovl_sz);
 	if (ret)
 		return ret;
 
@@ -532,19 +535,19 @@ static bool of_overlay_valid_config(struct fit_handle *fit,
 }
 
 static int of_overlay_global_fixup_fit(struct device_node *root,
-				       const char *fit_path, loff_t fit_size)
+				       const char *fit_path)
 {
 	enum bootm_verify verify = bootm_get_verify_mode();
 	struct device_node *conf_node;
 	struct fit_handle *fit;
-	int ret;
+	int ret = 0;
 
 	if (!IS_ENABLED(CONFIG_FITIMAGE)) {
 		pr_err("FIT based overlay handling requested while CONFIG_FITIMAGE=n\n");
 		return -EINVAL;
 	}
 
-	fit = fit_open(fit_path, 0, verify, fit_size);
+	fit = fit_open(fit_path, 0, verify);
 	if (IS_ERR(fit)) {
 		pr_err("Loading FIT image %s failed with: %pe\n", fit_path, fit);
 		return PTR_ERR(fit);
@@ -595,7 +598,7 @@ static int of_overlay_global_fixup(struct device_node *root, void *data)
 	}
 
 	/* Assume a FIT image if of_overlay_path points to a file */
-	ret = of_overlay_global_fixup_fit(root, dir, s.st_size);
+	ret = of_overlay_global_fixup_fit(root, dir);
 
 out:
 	free(dir);

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
-VERSION = 2025
-PATCHLEVEL = 12
+VERSION = 2026
+PATCHLEVEL = 03
 SUBLEVEL = 0
 EXTRAVERSION =
 NAME = None
@@ -448,7 +448,6 @@ LEX		= flex
 YACC		= bison
 AWK		= awk
 GENKSYMS	= scripts/genksyms/genksyms
-DEPMOD		= /sbin/depmod
 KALLSYMS	= scripts/kallsyms
 SCONFIGPOST	= scripts/sconfig/sconfigpost
 PERL		= perl
@@ -468,7 +467,7 @@ PYTEST		= $(if $(shell command -v labgrid-pytest 2>/dev/null),labgrid-pytest,pyt
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ -Wbitwise $(CF)
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
-CFLAGS_MODULE	= -fshort-wchar
+CFLAGS_MODULE	= -fshort-wchar -std=gnu11
 AFLAGS_MODULE	=
 
 LDFLAGS_MODULE  = -T common/module.lds
@@ -619,7 +618,9 @@ export KBUILD_DEFCONFIG CC_VERSION_TEXT
 endif
 
 %_efiloader_defconfig: FORCE
-	$(call merge_into_defconfig,$*_defconfig,efi-loader)
+	$(call merge_into_defconfig_named,$*_defconfig,efi-loader,$@)
+%_efi_defconfig: FORCE
+	$(call merge_into_defconfig_named,$*_defconfig,efi-loader efi-payload,$@)
 
 config: outputmakefile scripts_basic FORCE
 	$(Q)$(MAKE) $(build)=scripts/kconfig KCONFIG_DEFCONFIG_LIST= $@
@@ -672,6 +673,12 @@ export KBUILD_MODULES KBUILD_BUILTIN
 
 ifdef need-config
 include include/config/auto.conf
+endif
+
+ifeq ($(CONFIG_RELR),y)
+# ld.lld before 15 did not support -z pack-relative-relocs.
+LDFLAGS_barebox += $(call ld-option,--pack-dyn-relocs=relr,-z pack-relative-relocs)
+LDFLAGS_pbl += $(call ld-option,--pack-dyn-relocs=relr,-z pack-relative-relocs)
 endif
 
 # We need some generic definitions.
@@ -831,7 +838,11 @@ export KBUILD_BINARY ?= barebox.bin
 # Also any assignments in arch/$(SRCARCH)/Makefile take precedence over
 # the default value.
 
+ifeq ($(CONFIG_PBL_IMAGE_ELF),y)
+export BAREBOX_PROPER ?= vmbarebox
+else
 export BAREBOX_PROPER ?= barebox.bin
+endif
 
 barebox-flash-images: $(KBUILD_IMAGE)
 	@echo $^ > $@
@@ -1078,7 +1089,7 @@ endif
 	fi
 	@echo
 	@# This is intentionally not @suppressed, to make it easier to reproduce
-	(cd $(srctree); $(PYTEST))
+	(cd $(srctree); KBUILD_OUTPUT=$(abs_objtree) $(PYTEST))
 
 PHONY += check
 
@@ -1095,6 +1106,14 @@ barebox.fit: images/barebox-$(CONFIG_ARCH_LINUX_NAME).fit
 
 barebox.srec: barebox
 	$(OBJCOPY) -O srec $< $@
+
+OBJCOPYFLAGS_vmbarebox = $(call objcopy-option,--strip-section-headers,--strip-all)  \
+			 --remove-section=.comment \
+			 --remove-section=.note* \
+			 --remove-section=.gnu.hash
+
+vmbarebox: barebox FORCE
+	$(call if_changed,objcopy)
 
 quiet_cmd_barebox_proper__ = CC      $@
       cmd_barebox_proper__ = $(CC) -r -o $@ -Wl,--whole-archive $(BAREBOX_OBJS)
@@ -1120,7 +1139,6 @@ $(sort $(BAREBOX_OBJS)) $(BAREBOX_LDS) $(BAREBOX_PBL_OBJS): $(barebox-dirs) ;
 
 PHONY += $(barebox-dirs)
 $(barebox-dirs): prepare scripts
-	@find $(objtree)/$@ -name policy-list -exec rm -f {} \; 2>/dev/null || true
 	$(Q)$(MAKE) $(build)=$@
 
 # Store (new) KERNELRELASE string in include/config/kernel.release
@@ -1215,12 +1233,17 @@ targets += include/generated/security_autoconf.h
 targets += include/generated/sconfig_names.h
 
 KPOLICY = $(shell find $(objtree)/ -name policy-list -exec cat {} \;)
-KPOLICY.tmp = $(addsuffix .tmp,$(KPOLICY))
 
-PHONY += collect-policies
-collect-policies: KBUILD_MODULES :=
-collect-policies: KBUILD_BUILTIN :=
-collect-policies: $(barebox-dirs) FORCE
+collect-dirs    := $(addprefix _policy_collect_,$(barebox-alldirs))
+
+PHONY += _policy_collect_clean $(collect-dirs) collect-policies
+_policy_collect_clean:
+	$(Q)find $(objtree)/ -name policy-list -delete 2>/dev/null || true
+
+$(collect-policy-dirs): | _policy_collect_clean
+	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.policy obj=$(patsubst _policy_collect_%,%,$@)
+
+collect-policies: $(collect-policy-dirs)
 
 PHONY += security_listconfigs
 security_listconfigs: collect-policies FORCE
@@ -1228,16 +1251,20 @@ security_listconfigs: collect-policies FORCE
 	@$(foreach p, $(KPOLICY), echo $p ;)
 
 PHONY += security_checkconfigs
-security_checkconfigs: collect-policies $(KPOLICY.tmp) FORCE
+security_checkconfigs: collect-policies FORCE
+	+$(Q)$(foreach p, $(KPOLICY), \
+		$(MAKE) $(build)=$(patsubst %/,%,$(dir $p)) $p.tmp ;)
 	+$(Q)$(foreach p, $(KPOLICY), \
 		$(call loop_cmd,security_checkconfig,$p.tmp))
 
-security_%config: collect-policies $(KPOLICY.tmp) FORCE
+security_%config: collect-policies FORCE
+	+$(Q)$(foreach p, $(KPOLICY), \
+		$(MAKE) $(build)=$(patsubst %/,%,$(dir $p)) $p.tmp ;)
 	+$(Q)$(foreach p, $(KPOLICY), $(call loop_cmd,sconfig, \
 		$(@:security_%=%),$p.tmp))
 ifeq ($(KPOLICY_TMPUPDATE),)
 	+$(Q)$(foreach p, $(KPOLICY), \
-		cp 2>/dev/null $p.tmp $(call resolve-srctree,$p) || true;)
+		cp 2>/dev/null $p.tmp $(call resolve-external,$p) || true;)
 endif
 
 quiet_cmd_sconfigpost = SCONFPP $@
@@ -1317,18 +1344,13 @@ modules_prepare: prepare scripts
 
 # Target to install modules
 PHONY += modules_install
-modules_install: _modinst_ _modinst_post
+modules_install: _modinst_
 
 PHONY += _modinst_
 _modinst_:
-	@if [ -z "`$(DEPMOD) -V 2>/dev/null | grep module-init-tools`" ]; then \
-		echo "Warning: you may need to install module-init-tools"; \
-		echo "See http://www.codemonkey.org.uk/docs/post-halloween-2.6.txt";\
-		sleep 1; \
-	fi
-	@rm -rf $(MODLIB)/kernel
+	@rm -rf $(MODLIB)/barebox
 	@rm -f $(MODLIB)/source
-	@mkdir -p $(MODLIB)/kernel
+	@mkdir -p $(MODLIB)/barebox
 	@ln -s $(srctree) $(MODLIB)/source
 	@if [ ! $(objtree) -ef  $(MODLIB)/build ]; then \
 		rm -f $(MODLIB)/build ; \
@@ -1346,9 +1368,20 @@ depmod_opts	:=
 else
 depmod_opts	:= -b $(INSTALL_MOD_PATH) -r
 endif
-PHONY += _modinst_post
-_modinst_post: _modinst_
-	if [ -r System.map -a -x $(DEPMOD) ]; then $(DEPMOD) -ae -F System.map $(depmod_opts) $(KERNELRELEASE); fi
+
+# Target to build modules environment
+MODULES_ENV_DIR := $(objtree)/.tmp_barebox_modules_env
+CLEAN_DIRS += $(MODULES_ENV_DIR)
+
+barebox_modules_env: modules FORCE
+	$(Q)rm -rf $(MODULES_ENV_DIR)
+	$(Q)$(MAKE) -f $(srctree)/Makefile modules_install MODLIB=$(MODULES_ENV_DIR)
+	$(Q)$(objtree)/scripts/bareboxenv -s $(MODULES_ENV_DIR)/barebox $@
+	$(Q)mv barebox_modules_env $(objtree)/defaultenv/
+
+ifdef CONFIG_MODULES_ENVIRONMENT
+all: barebox_modules_env
+endif
 
 else # CONFIG_MODULES
 
@@ -1378,7 +1411,7 @@ CLEAN_FILES +=	barebox System.map include/generated/barebox_default_env.h \
                 .tmp_version .tmp_barebox* barebox.bin barebox.map \
 		.tmp_kallsyms* compile_commands.json \
 		.tmp_barebox.o barebox.o barebox-flash-image \
-		barebox.srec barebox.efi
+		barebox.srec barebox.efi vmbarebox
 
 CLEAN_FILES +=	scripts/bareboxenv-target scripts/kernel-install-target \
 		scripts/bareboxcrc32-target scripts/bareboximd-target \
@@ -1393,8 +1426,7 @@ MRPROPER_FILES += .config .config.old .security_config .version .old_version \
 
 # clean - Delete most, but leave enough to build external modules
 #
-clean: rm-dirs  := $(CLEAN_DIRS)
-clean: rm-files := $(CLEAN_FILES)
+clean: rm-files := $(CLEAN_FILES) $(CLEAN_DIRS)
 clean-dirs      := $(addprefix _clean_,$(srctree) $(barebox-alldirs))
 
 PHONY += $(clean-dirs) clean archclean
@@ -1403,7 +1435,6 @@ $(clean-dirs):
 	$(Q)$(MAKE) $(clean)=$(patsubst _clean_%,%,$@)
 
 clean: archclean $(clean-dirs)
-	$(call cmd,rmdirs)
 	$(call cmd,rmfiles)
 	@find . $(RCS_FIND_IGNORE) \
 		\( -name '*.[oas]' -o -name '*.ko' -o -name '.*.cmd' \
@@ -1416,8 +1447,7 @@ clean: archclean $(clean-dirs)
 
 # mrproper - Delete all generated files, including .config
 #
-mrproper: rm-dirs  := $(wildcard $(MRPROPER_DIRS))
-mrproper: rm-files := $(wildcard $(MRPROPER_FILES))
+mrproper: rm-files := $(wildcard $(MRPROPER_DIRS)) $(wildcard $(MRPROPER_FILES))
 mrproper-dirs      := $(addprefix _mrproper_,scripts)
 
 PHONY += $(mrproper-dirs) mrproper
@@ -1425,7 +1455,6 @@ $(mrproper-dirs):
 	$(Q)$(MAKE) $(clean)=$(patsubst _mrproper_%,%,$@)
 
 mrproper: clean $(mrproper-dirs)
-	$(call cmd,rmdirs)
 	$(call cmd,rmfiles)
 
 # distclean
@@ -1446,7 +1475,7 @@ quiet_cmd_gen_compile_commands = GEN     $@
       cmd_gen_compile_commands = $(PYTHON3) $< -a $(AR) -o $@ $(filter-out $<, $(real-prereqs))
 
 compile_commands.json: scripts/clang-tools/gen_compile_commands.py \
-	$(BAREBOX_OBJS) $(if $(CONFIG_PBL_IMAGE),$(BAREBOX_PBL_OBJS),) FORCE
+	$(BAREBOX_OBJS) $(if $(CONFIG_PBL_IMAGE),$(BAREBOX_PBL_OBJS),) scripts/ FORCE
 	$(call if_changed,gen_compile_commands)
 
 PHONY += compile_commands.json
@@ -1590,11 +1619,8 @@ target-dir = $(dir $@)
 # FIXME Should go into a make.lib or something
 # ===========================================================================
 
-quiet_cmd_rmdirs = $(if $(wildcard $(rm-dirs)),CLEAN   $(wildcard $(rm-dirs)))
-      cmd_rmdirs = rm -rf $(rm-dirs)
-
 quiet_cmd_rmfiles = $(if $(wildcard $(rm-files)),CLEAN   $(wildcard $(rm-files)))
-      cmd_rmfiles = rm -f $(rm-files)
+      cmd_rmfiles = rm -rf $(rm-files)
 
 
 a_flags = -Wp,-MD,$(depfile) $(KBUILD_AFLAGS) $(AFLAGS_KERNEL) \

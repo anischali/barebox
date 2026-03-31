@@ -255,12 +255,14 @@ static struct generic_pm_domain *genpd_get_from_provider(
 					struct of_phandle_args *genpdspec)
 {
 	struct generic_pm_domain *genpd = ERR_PTR(-ENOENT);
-	struct device_node *node = genpdspec->np;
 	struct of_genpd_provider *provider;
+	struct device_node *node;
 	int ret;
 
 	if (!genpdspec)
 		return ERR_PTR(-EINVAL);
+
+	node = genpdspec->np;
 
 	ret = of_device_ensure_probed(node);
 	if (ret) {
@@ -361,6 +363,7 @@ bool genpd_is_active(void)
 {
 	return have_genpd_providers && !list_empty(&gpd_list);
 }
+EXPORT_SYMBOL(genpd_is_active);
 
 static struct bus_type genpd_bus_type = {
 	.name		= "genpd",
@@ -563,3 +566,4 @@ void pm_genpd_print(void)
 		printf("%-20s %6s\n", genpd->name,
 		       genpd->status == GPD_STATE_ACTIVE ? "on" : "off");
 }
+EXPORT_SYMBOL(pm_genpd_print);

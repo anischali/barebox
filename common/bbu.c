@@ -288,6 +288,7 @@ bool bbu_handlers_available(void)
 {
 	return !list_empty(&bbu_image_handlers);
 }
+EXPORT_SYMBOL(bbu_handlers_available);
 
 /*
  * print a list of all registered update handlers
@@ -445,7 +446,7 @@ int bbu_flash(struct bbu_data *data, loff_t offset)
 	if (ret)
 		return ret;
 
-	fd = open(data->devicefile, oflags);
+	fd = open(data->devicefile, oflags, 0666);
 	if (fd < 0)
 		return fd;
 

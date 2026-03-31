@@ -87,6 +87,7 @@ struct firmware_mgr *firmwaremgr_find_by_node(struct device_node *np)
 
 	return NULL;
 }
+EXPORT_SYMBOL(firmwaremgr_find_by_node);
 
 /*
  * firmwaremgr_list_handlers - list registered firmware device handlers
@@ -292,7 +293,7 @@ int firmwaremgr_load_file(struct firmware_mgr *mgr, const char *firmware)
 		ret = uncompress_fd_to_fd(firmwarefd, devicefd,
 					  uncompress_err_stdout);
 	else
-		ret = copy_fd(firmwarefd, devicefd);
+		ret = copy_fd(firmwarefd, devicefd, 0);
 
 out:
 	free(dst);

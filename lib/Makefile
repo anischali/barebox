@@ -3,6 +3,7 @@
 obj-y			+= bobject.o
 obj-y			+= bcd.o
 obj-y			+= term.o
+obj-pbl-$(CONFIG_ELF)	+= elf.o
 obj-$(CONFIG_BOOTSTRAP)	+= bootstrap/
 obj-pbl-y		+= ctype.o
 obj-y			+= rbtree.o
@@ -15,6 +16,7 @@ obj-y			+= vsprintf.o
 obj-y			+= talloc.o
 obj-$(CONFIG_KASAN)	+= kasan/
 obj-pbl-$(CONFIG_STACKPROTECTOR)	+= stackprot.o
+obj-pbl-$(CONFIG_LIBRELOC)		+= reloc.o
 pbl-$(CONFIG_PBL_CONSOLE) += vsprintf.o
 obj-y			+= misc.o
 obj-$(CONFIG_PARAMETER)	+= parameter.o

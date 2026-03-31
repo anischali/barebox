@@ -67,7 +67,7 @@ void register_barebox_area(resource_size_t start,
 static int mem_register_barebox(void)
 {
 	if (barebox_start && barebox_size)
-		barebox_res = request_sdram_region("barebox", barebox_start,
+		barebox_res = request_sdram_region_silent("barebox", barebox_start,
 						   barebox_size,
 						   MEMTYPE_BOOT_SERVICES_CODE,
 						   MEMATTRS_RWX); // FIXME
@@ -108,7 +108,7 @@ struct resource *request_barebox_region(const char *name,
 		return iores;
 	}
 
-	return request_sdram_region(name, start, size, memtype, memattrs);
+	return request_sdram_region_silent(name, start, size, memtype, memattrs);
 }
 
 static int mem_malloc_resource(void)
@@ -122,7 +122,7 @@ static int mem_malloc_resource(void)
 	 * regions are outside of sdram in which case
 	 * the following fails.
 	 */
-	request_sdram_region("malloc space",
+	request_sdram_region_silent("malloc space",
 			malloc_start,
 			malloc_end - malloc_start + 1,
 			MEMTYPE_BOOT_SERVICES_DATA, MEMATTRS_RW);
@@ -179,7 +179,7 @@ static int mem_malloc_resource(void)
 			MEMATTRS_RW);
 #endif
 #ifdef STACK_BASE
-	request_sdram_region("stack", STACK_BASE, STACK_SIZE,
+	request_sdram_region_silent("stack", STACK_BASE, STACK_SIZE,
 			     MEMTYPE_BOOT_SERVICES_DATA, MEMATTRS_RW);
 #endif
 
@@ -212,6 +212,7 @@ void *sbrk(ptrdiff_t increment)
 }
 
 LIST_HEAD(memory_banks);
+EXPORT_SYMBOL(memory_banks);
 
 static int barebox_grow_memory_bank(struct memory_bank *bank, const char *name,
 				    const struct resource *newres)
@@ -302,18 +303,24 @@ postmem_initcall(add_mem_devices);
  * Request a region from the registered sdram
  */
 struct resource *__request_sdram_region(const char *name,
-					resource_size_t start, resource_size_t size)
+					resource_size_t start, resource_size_t size,
+					bool verbose)
 {
 	struct memory_bank *bank;
+	resource_size_t end = start + size - 1;
 
 	for_each_memory_bank(bank) {
 		struct resource *res;
 
-		res = __request_region(bank->res, start, start + size - 1,
+		res = __request_region(bank->res, start, end,
 				       name, IORESOURCE_MEM);
 		if (!IS_ERR(res))
 			return res;
 	}
+
+	if (verbose)
+		pr_err("unable to request SDRAM region for %s at %pa-%pa\n",
+		       name, &start, &end);
 
 	return NULL;
 }
@@ -339,7 +346,7 @@ struct resource *reserve_sdram_region(const char *name, resource_size_t start,
 	 * want to set the reserved flag independently of whether
 	 * CONFIG_MEMORY_ATTRIBUTES is enabled or not
 	 */
-	res = __request_sdram_region(name, start, size);
+	res = __request_sdram_region(name, start, size, true);
 	if (!res)
 		return NULL;
 
@@ -350,11 +357,6 @@ struct resource *reserve_sdram_region(const char *name, resource_size_t start,
 	remap_range((void *)start, size, MAP_UNCACHED);
 
 	return res;
-}
-
-int release_sdram_region(struct resource *res)
-{
-	return release_region(res);
 }
 
 void memory_bank_find_space(struct memory_bank *bank, resource_size_t *retstart,
@@ -406,6 +408,31 @@ int memory_bank_first_find_space(resource_size_t *retstart,
 	}
 
 	return -ENOENT;
+}
+
+/**
+ * memory_bank_lookup_region - find the memory region containing a given address
+ * @addr: physical address to look up
+ * @gap: if non-NULL and addr is in a gap, the gap info is copied here
+ *
+ * Searches all memory banks for the region containing @addr. If @addr falls
+ * within a gap between allocated regions and @gap is provided, the gap
+ * boundaries are returned via @gap.
+ *
+ * Return: pointer to the resource containing @addr, @gap if in a gap,
+ *         or NULL if not found in any memory bank
+ */
+struct resource *memory_bank_lookup_region(resource_size_t addr, struct resource *gap)
+{
+	struct memory_bank *bank;
+
+	for_each_memory_bank(bank) {
+		if (addr < bank->res->start || bank->res->end < addr)
+			continue;
+		return lookup_region(bank->res, addr, gap);
+	}
+
+	return NULL;
 }
 
 #ifdef CONFIG_OFTREE

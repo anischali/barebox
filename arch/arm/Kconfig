@@ -3,6 +3,7 @@
 config ARM
 	bool
 	select HAS_KALLSYMS
+	select HAVE_STACKPROTECTOR
 	select HAVE_IMAGE_COMPRESSION
 	select HAVE_ARCH_KASAN
 	select ARCH_HAS_SJLJ
@@ -18,6 +19,7 @@ config ARM
 	select HW_HAS_PCI
 	select ARCH_HAS_DMA_WRITE_COMBINE
 	select HAVE_EFI_LOADER if MMU # for payload unaligned accesses
+	select PBL_IMAGE_ELF
 	default y
 
 config ARCH_LINUX_NAME
@@ -34,6 +36,7 @@ config ARM32
 
 config ARM64
 	def_bool CPU_64
+	select ARCH_HAS_RELR
 
 config ARCH_TEXT_BASE
 	hex

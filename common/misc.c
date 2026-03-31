@@ -16,6 +16,7 @@
 #include <restart.h>
 #include <poweroff.h>
 #include <string.h>
+#include <machine_id.h>
 #include <linux/stringify.h>
 
 int errno;
@@ -142,6 +143,7 @@ BAREBOX_MAGICVAR(global.model, "Product name of this hardware");
 
 static char *hostname;
 static char *serial_number;
+static uuid_t product_uuid;
 
 /* Note that HOST_NAME_MAX is 64 on Linux */
 #define BAREBOX_HOST_NAME_MAX	64
@@ -251,6 +253,76 @@ const char *barebox_get_serial_number(void)
 }
 
 BAREBOX_MAGICVAR(global.serial_number, "Board serial number");
+
+void barebox_set_product_uuid(const uuid_t *__product_uuid)
+{
+	globalvar_add_simple_uuid("product.uuid", &product_uuid);
+	product_uuid = *__product_uuid;
+}
+
+const uuid_t *barebox_get_product_uuid(void)
+{
+	return &product_uuid;
+}
+
+BAREBOX_MAGICVAR(global.product.uuid, "SMBIOS-reported product UUID");
+
+static char *soc_uid_str;
+static void *soc_uid;
+static size_t soc_uid_len;
+
+/*
+ * barebox_set_soc_uid - set a SoC Unique ID
+ *
+ * Set a SoC Unique ID. The ID is usually read from SoC internal eFuses. It
+ * can vary in length on different SoCs and can have different canonical hex
+ * representations. @uidstr can be NULL in which case uidbuf is interpreted
+ * as a byte array.
+ *
+ * barebox uses the SoC UID to generate a machine_id and exports it to the
+ * environment via global.soc_uid.
+ *
+ * In Linux the serial number is exported as /sys/devices/soc0/serial_number
+ * which should generally have the same format as *uidstr.
+ */
+void barebox_set_soc_uid(const char *uidstr, const void *uidbuf, size_t len)
+{
+	if (soc_uid_str) {
+		pr_warn("SoC UID already set. Ignoring\n");
+		return;
+	}
+
+	soc_uid = xmemdup(uidbuf, len);
+	soc_uid_len = len;
+
+	if (uidstr) {
+		soc_uid_str = xstrdup(uidstr);
+	} else {
+		soc_uid_str = xzalloc(len * 2 + 1);
+		bin2hex(soc_uid_str, uidbuf, len);
+	}
+
+	machine_id_set_hashable(uidbuf, len);
+
+	globalvar_add_simple_string("soc_uid", &soc_uid_str);
+}
+BAREBOX_MAGICVAR(global.soc_uid, "SoC Unique ID");
+
+const char *barebox_get_soc_uid(void)
+{
+	return soc_uid_str;
+}
+
+int barebox_get_soc_uid_bin(const void **buf, size_t *len)
+{
+	if (!soc_uid)
+		return -ENOENT;
+
+	*buf = soc_uid;
+	*len = soc_uid_len;
+
+	return 0;
+}
 
 #ifdef CONFIG_OFTREE
 static char *of_machine_compatible;

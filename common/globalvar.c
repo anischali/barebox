@@ -21,6 +21,7 @@ struct device global_device = {
 	.name = "global",
 	.id = DEVICE_ID_SINGLE,
 };
+EXPORT_SYMBOL(global_device);
 
 struct device nv_device = {
 	.name = "nv",
@@ -60,7 +61,7 @@ static int __nv_save(const char *prefix, const char *name, const char *val)
 
 	fname = basprintf("%s/%s", prefix, name);
 
-	fd = open(fname, O_CREAT | O_WRONLY | O_TRUNC);
+	fd = open(fname, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 
 	free(fname);
 
@@ -662,6 +663,46 @@ int globalvar_add_simple_ip(const char *name, IPaddr_t *ip)
 
 	p = dev_add_param_ip(&global_device, name, NULL, NULL,
 		ip, NULL);
+
+	if (IS_ERR(p))
+		return PTR_ERR(p);
+
+	globalvar_nv_sync(name);
+
+	return 0;
+}
+
+int globalvar_add_simple_uuid(const char *name, uuid_t *uuid)
+{
+	struct param_d *p;
+	int ret;
+
+	ret = globalvar_remove_unqualified(name);
+	if (ret)
+		return ret;
+
+	p = dev_add_param_uuid(&global_device, name,
+			       NULL, NULL, uuid, 0);
+
+	if (IS_ERR(p))
+		return PTR_ERR(p);
+
+	globalvar_nv_sync(name);
+
+	return 0;
+}
+
+int globalvar_add_simple_guid(const char *name, guid_t *guid)
+{
+	struct param_d *p;
+	int ret;
+
+	ret = globalvar_remove_unqualified(name);
+	if (ret)
+		return ret;
+
+	p = dev_add_param_guid(&global_device, name,
+			       NULL, NULL, guid, 0);
 
 	if (IS_ERR(p))
 		return PTR_ERR(p);

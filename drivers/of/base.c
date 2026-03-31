@@ -23,6 +23,7 @@
 #include <linux/ctype.h>
 #include <linux/err.h>
 #include <pm_domain.h>
+#include <tee/optee.h>
 
 static struct device_node *root_node;
 
@@ -294,7 +295,7 @@ int of_alias_get_free_id(const char *stem)
 
 	return id + 1;
 }
-EXPORT_SYMBOL_GPL(of_alias_get_highest_id);
+EXPORT_SYMBOL_GPL(of_alias_get_free_id);
 
 int of_alias_get_id_from(struct device_node *root, struct device_node *np,
 			 const char *stem)
@@ -2072,6 +2073,7 @@ struct device_node *of_get_root_node(void)
 {
 	return root_node;
 }
+EXPORT_SYMBOL(of_get_root_node);
 
 int of_set_root_node(struct device_node *node)
 {
@@ -2102,8 +2104,12 @@ of_populate_initcall(barebox_of_populate);
 
 int barebox_register_of(struct device_node *root)
 {
-	if (root_node)
-		return -EBUSY;
+	if (root_node) {
+		if (!list_empty(&root->children))
+			return -EBUSY;
+		/* Not necessarily safe to free, so leak it.. */
+		root_node = NULL;
+	}
 
 	of_set_root_node(root);
 	of_fix_tree(root);
@@ -2132,6 +2138,8 @@ int barebox_register_fdt(const void *dtb)
 		return PTR_ERR(root);
 	}
 
+	optee_register_overlay();
+
 	return barebox_register_of(root);
 }
 
@@ -2148,7 +2156,9 @@ int of_device_is_available(const struct device_node *device)
 	const char *status;
 	int statlen;
 
-	status = of_get_property(device, "status", &statlen);
+	status = of_get_property(device, "barebox,status", &statlen);
+	if (status == NULL)
+		status = of_get_property(device, "status", &statlen);
 	if (status == NULL)
 		return 1;
 

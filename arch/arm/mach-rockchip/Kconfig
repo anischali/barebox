@@ -27,6 +27,10 @@ config ARCH_ROCKCHIP_V8
 	select CPU_V8
 	select ARM_ATF
 
+config ARCH_RK3562
+	bool
+	select ARCH_ROCKCHIP_V8
+
 config ARCH_RK3568
 	bool
 	select ARCH_ROCKCHIP_V8
@@ -59,6 +63,18 @@ config MACH_PHYTEC_SOM_RK3288
 endif
 
 if 64BIT
+
+config MACH_RK3562_EVB2
+	select ARCH_RK3562
+	bool "RK3562 EVB2"
+	help
+	  Say Y here if you are using a RK3562 EVB2
+
+config MACH_RK3562_KICKPI_K3
+	select ARCH_RK3562
+	bool "RK3562 KICKPI K3"
+	help
+	  Say Y here if you are using a RK3562 KICKPI K3
 
 config MACH_RK3568_EVB
 	select ARCH_RK3568
@@ -93,17 +109,24 @@ config MACH_PINE64_QUARTZ64
 	help
 	  Say Y here if you are using a Pine64 Quartz64
 
-config MACH_PROTONIC_MECSBC
+config MACH_PROTONIC_RK356X
 	select ARCH_RK3568
-	bool "Protonic MECSBC"
+	bool "Protonic RK356x"
 	help
-	  Say Y here if you are using a Protonic MECSBC
+	  Say Y here if you are using a Protonic board with a RK356x cpu
 
 config MACH_PROTONIC_PRTPUK
 	select ARCH_RK3576
 	bool "Protonic PRTPUK"
 	help
 	  Say Y here if you are using a Protonic PRTPUK
+
+config MACH_QNAP_TSX33
+	select ARCH_RK3568
+	bool "QNAP TS-433 NAS"
+	help
+	  Select this if you are using a QNAP TS-433 NAS.
+	  <https://www.qnap.com/en-us/product/ts-433>
 
 config MACH_RADXA_ROCK3
 	select ARCH_RK3568
@@ -152,6 +175,7 @@ config ARCH_ROCKCHIP_ATF
 config ARCH_ROCKCHIP_ATF_PASS_FDT
 	bool "Pass device tree to TF-A"
 	depends on ARCH_ROCKCHIP_ATF
+	select LIBFDT
 	help
 	  Enable this option if you are using an upstream OP-TEE that uses the
 	  device tree to initialize dynamic shared memory, which is passed

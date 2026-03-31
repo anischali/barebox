@@ -127,8 +127,9 @@ static int barebox_memory_areas_init(void)
 }
 device_initcall(barebox_memory_areas_init);
 
-__noreturn __prereloc void barebox_non_pbl_start(unsigned long membase,
-		unsigned long memsize, struct handoff_data *hd)
+__noreturn void barebox_non_pbl_start(unsigned long membase,
+				      unsigned long memsize,
+				      struct handoff_data *hd)
 {
 	unsigned long endmem = membase + memsize;
 	unsigned long malloc_start, malloc_end;
@@ -136,14 +137,8 @@ __noreturn __prereloc void barebox_non_pbl_start(unsigned long membase,
 							   barebox_image_size,
 							   hd);
 
-	if (IS_ENABLED(CONFIG_CPU_V7))
+	if (IS_ENABLED(CONFIG_CPU_V7VE))
 		armv7_hyp_install();
-
-	relocate_to_adr(barebox_base);
-
-	setup_c();
-
-	barrier();
 
 	pbl_barebox_break();
 
@@ -193,15 +188,4 @@ __noreturn __prereloc void barebox_non_pbl_start(unsigned long membase,
 	pr_debug("starting barebox...\n");
 
 	start_barebox();
-}
-
-void start(unsigned long membase, unsigned long memsize, struct handoff_data *hd);
-/*
- * First function in the uncompressed image. We get here from
- * the pbl. The stack already has been set up by the pbl.
- */
-void NAKED __prereloc __section(.text_entry) start(unsigned long membase,
-		unsigned long memsize, struct handoff_data *hd)
-{
-	barebox_non_pbl_start(membase, memsize, hd);
 }

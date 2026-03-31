@@ -13,7 +13,7 @@
 #else
 #define __bug_printf no_printf
 #define __bug_panic panic_no_stacktrace
-#define __bug_dump_stack (void)0
+#define __bug_dump_stack() (void)0
 #endif
 
 #define BUG() do {						\
@@ -77,5 +77,12 @@
 	if (IS_ENABLED(CONFIG_BUG_ON_DATA_CORRUPTION))	\
 		BUG_ON(!(expr));			\
 } while (0)
+
+
+#ifdef DEBUG
+#define DEBUG_ASSERT(expr)	BUG_ON(!(expr))
+#else
+#define DEBUG_ASSERT(expr)	((void)(expr))
+#endif
 
 #endif

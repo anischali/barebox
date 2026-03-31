@@ -2675,6 +2675,7 @@ static struct file *tmpfile_create(const struct path *parentpath,
 	if (!f)
 		return ERR_PTR(-EMFILE);
 
+	mntget(parentpath->mnt);
 	f->f_path.mnt = parentpath->mnt;
 	f->f_path.dentry = d_alloc_anon(&fsdev->sb);
 	f->f_flags = flags;
@@ -3506,7 +3507,7 @@ static int automount_mount(struct dentry *dentry)
 
 		setenv("automount_path", am->path);
 		export("automount_path");
-		ret = run_command(am->cmd);
+		ret = run_command("%s", am->cmd);
 		unsetenv("automount_path");
 
 		if (ret) {

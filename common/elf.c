@@ -3,7 +3,6 @@
  * Copyright (c) 2018 Pengutronix, Oleksij Rempel <o.rempel@pengutronix.de>
  */
 
-#include <common.h>
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -18,7 +17,6 @@ struct elf_segment {
 	struct list_head list;
 	struct resource *r;
 	void *phdr;
-	bool is_iomem_region;
 };
 
 static int elf_request_region(struct elf_image *elf, resource_size_t start,
@@ -32,15 +30,14 @@ static int elf_request_region(struct elf_image *elf, resource_size_t start,
 	if (!r)
 		return -ENOMEM;
 
-	r_new = request_sdram_region("elf_segment", start, size,
-				     MEMTYPE_LOADER_CODE, MEMATTRS_RWX);
+	r_new = request_sdram_region_silent("elf_segment", start, size,
+					    MEMTYPE_LOADER_CODE, MEMATTRS_RWX);
 	if (!r_new) {
 		r_new = request_iomem_region("elf_segment", start, size);
 		if (!r_new) {
 			pr_err("Failed to request region: %pa %pa\n", &start, &size);
 			return -EINVAL;
 		}
-		r->is_iomem_region = true;
 	}
 
 	r->r = r_new;
@@ -56,18 +53,66 @@ static void elf_release_regions(struct elf_image *elf)
 	struct elf_segment *r, *r_tmp;
 
 	list_for_each_entry_safe(r, r_tmp, list, list) {
-		if (r->is_iomem_region)
-			release_region(r->r);
-		else
-			release_sdram_region(r->r);
+		release_region(r->r);
 		list_del(&r->list);
 		free(r);
 	}
 }
 
+static int elf_compute_load_offset(struct elf_image *elf)
+{
+	void *buf = elf->hdr_buf;
+	void *phdr = buf + elf_hdr_e_phoff(elf, buf);
+	u64 min_vaddr = (u64)-1;
+	u64 min_paddr = (u64)-1;
+	unsigned long base_load_addr;
+
+	/* Find lowest p_vaddr and p_paddr in PT_LOAD segments */
+	elf_for_each_segment(phdr, elf, buf) {
+		if (elf_phdr_p_type(elf, phdr) == PT_LOAD) {
+			u64 vaddr = elf_phdr_p_vaddr(elf, phdr);
+			u64 paddr = elf_phdr_p_paddr(elf, phdr);
+
+			if (vaddr < min_vaddr)
+				min_vaddr = vaddr;
+			if (paddr < min_paddr)
+				min_paddr = paddr;
+		}
+	}
+
+	/*
+	 * Determine base load address:
+	 * 1. If user specified load_address, use it
+	 * 2. Otherwise for ET_EXEC, use NULL (segments use p_paddr directly)
+	 * 3. For ET_DYN, use lowest p_paddr
+	 */
+	if (elf->load_address)
+		base_load_addr = (unsigned long)elf->load_address;
+	else if (elf->type == ET_EXEC)
+		base_load_addr = 0;
+	else
+		base_load_addr = min_paddr;
+
+	/*
+	 * Calculate relocation offset:
+	 * - For ET_EXEC with no custom load address: no offset needed
+	 * - Otherwise: offset = base_load_addr - lowest_vaddr
+	 */
+	if (elf->type == ET_EXEC && !elf->load_address)
+		elf->reloc_offset = 0;
+	else
+		elf->reloc_offset = base_load_addr - min_vaddr;
+
+	pr_debug("ELF load: type=%s, base=%08lx, offset=%08lx\n",
+		 elf->type == ET_EXEC ? "ET_EXEC" : "ET_DYN",
+		 base_load_addr, elf->reloc_offset);
+
+	return 0;
+}
+
 static int request_elf_segment(struct elf_image *elf, void *phdr)
 {
-	void *dst = (void *) (phys_addr_t) elf_phdr_p_paddr(elf, phdr);
+	void *dst;
 	int ret;
 	u64 p_memsz = elf_phdr_p_memsz(elf, phdr);
 
@@ -77,6 +122,15 @@ static int request_elf_segment(struct elf_image *elf, void *phdr)
 
 	if (!p_memsz)
 		return 0;
+
+	/*
+	 * Calculate destination address:
+	 * - If reloc_offset is set (custom load address or ET_DYN):
+	 *   dst = reloc_offset + p_vaddr
+	 * - Otherwise (ET_EXEC, no custom address):
+	 *   dst = p_paddr (original behavior)
+	 */
+	dst = elf_phdr_relocated_paddr(elf, phdr);
 
 	if (dst < elf->low_addr)
 		elf->low_addr = dst;
@@ -129,7 +183,8 @@ static int load_elf_to_memory(struct elf_image *elf)
 		p_offset = elf_phdr_p_offset(elf, r->phdr);
 		p_filesz = elf_phdr_p_filesz(elf, r->phdr);
 		p_memsz = elf_phdr_p_memsz(elf, r->phdr);
-		dst = (void *) (phys_addr_t) elf_phdr_p_paddr(elf, r->phdr);
+
+		dst = elf_phdr_relocated_paddr(elf, r->phdr);
 
 		pr_debug("Loading phdr offset 0x%llx to 0x%p (%llu bytes)\n",
 			 p_offset, dst, p_filesz);
@@ -166,19 +221,22 @@ out:
 static int load_elf_image_segments(struct elf_image *elf)
 {
 	void *buf = elf->hdr_buf;
-	void *phdr = (void *) (buf + elf_hdr_e_phoff(elf, buf));
-	int i, ret;
+	void *phdr;
+	int ret;
 
 	/* File as already been loaded */
 	if (!list_empty(&elf->list))
 		return -EINVAL;
 
-	for (i = 0; i < elf_hdr_e_phnum(elf, buf) ; ++i) {
+	/* Calculate load offset for ET_DYN */
+	ret = elf_compute_load_offset(elf);
+	if (ret)
+		return ret;
+
+	elf_for_each_segment(phdr, elf, buf) {
 		ret = request_elf_segment(elf, phdr);
 		if (ret)
 			goto elf_release_regions;
-
-		phdr += elf_size_of_phdr(elf);
 	}
 
 	/*
@@ -199,36 +257,6 @@ elf_release_regions:
 	return ret;
 }
 
-static int elf_check_image(struct elf_image *elf, void *buf)
-{
-	if (strncmp(buf, ELFMAG, SELFMAG)) {
-		pr_err("ELF magic not found.\n");
-		return -EINVAL;
-	}
-
-	elf->class = ((char *) buf)[EI_CLASS];
-
-	if (elf_hdr_e_type(elf, buf) != ET_EXEC) {
-		pr_err("Non EXEC ELF image.\n");
-		return -ENOEXEC;
-	}
-
-	if (!elf_hdr_e_phnum(elf, buf)) {
-		pr_err("No phdr found.\n");
-		return -ENOEXEC;
-	}
-
-	return 0;
-}
-
-static void elf_init_struct(struct elf_image *elf)
-{
-	INIT_LIST_HEAD(&elf->list);
-	elf->low_addr = (void *) (unsigned long) -1;
-	elf->high_addr = 0;
-	elf->filename = NULL;
-}
-
 struct elf_image *elf_open_binary(void *buf)
 {
 	int ret;
@@ -238,16 +266,11 @@ struct elf_image *elf_open_binary(void *buf)
 	if (!elf)
 		return ERR_PTR(-ENOMEM);
 
-	elf_init_struct(elf);
-
-	elf->hdr_buf = buf;
-	ret = elf_check_image(elf, buf);
+	ret = elf_open_binary_into(elf, buf);
 	if (ret) {
 		free(elf);
-		return ERR_PTR(-EINVAL);
+		return ERR_PTR(ret);
 	}
-
-	elf->entry = elf_hdr_e_entry(elf, elf->hdr_buf);
 
 	return elf;
 }
@@ -315,7 +338,7 @@ static struct elf_image *elf_check_init(const char *filename)
 	}
 	close(fd);
 
-	elf->filename = strdup(filename);
+	elf->filename = strdup_const(filename);
 	if (!elf->filename) {
 		ret = -ENOMEM;
 		goto err_free_hdr_buf;
@@ -338,9 +361,56 @@ struct elf_image *elf_open(const char *filename)
 	return elf_check_init(filename);
 }
 
+static int elf_relocate(struct elf_image *elf)
+{
+	void *dyn_seg;
+
+	/*
+	 * Relocations needed if:
+	 * - ET_DYN (position-independent), OR
+	 * - ET_EXEC with custom load address
+	 */
+	if (elf->type == ET_EXEC && !elf->load_address)
+		return 0;
+
+	/* Find PT_DYNAMIC segment */
+	dyn_seg = elf_find_dynamic_segment(elf);
+	if (!dyn_seg) {
+		/*
+		 * No PT_DYNAMIC segment found.
+		 * For ET_DYN this is unusual but legal.
+		 * For ET_EXEC with custom load address, this means no relocations
+		 * can be applied - warn the user.
+		 */
+		if (elf->type == ET_EXEC && elf->load_address) {
+			pr_warn("ET_EXEC loaded at custom address but no PT_DYNAMIC segment - "
+				"relocations cannot be applied\n");
+		} else {
+			pr_debug("No PT_DYNAMIC segment found\n");
+		}
+		return 0;
+	}
+
+	/* Call architecture-specific relocation handler */
+	return elf_apply_relocations(elf, dyn_seg);
+}
+
 int elf_load(struct elf_image *elf)
 {
-	return load_elf_image_segments(elf);
+	int ret;
+
+	ret = load_elf_image_segments(elf);
+	if (ret)
+		return ret;
+
+	/* Apply relocations if needed */
+	ret = elf_relocate(elf);
+	if (ret) {
+		pr_err("Relocation failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
 }
 
 void elf_close(struct elf_image *elf)

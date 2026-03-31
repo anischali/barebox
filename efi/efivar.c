@@ -82,7 +82,7 @@ int efi_set_variable_usec(char *name, efi_guid_t *vendor, uint64_t usec)
 	char buf[20];
 	wchar_t buf16[40];
 
-	snprintf(buf, sizeof(buf), "%lld", usec);
+	snprintf(buf, sizeof(buf), "%llu", usec);
 	strcpy_char_to_wchar(buf16, buf);
 
 	return efi_set_variable(name, vendor,
@@ -96,18 +96,21 @@ int efi_set_variable_printf(char *name, efi_guid_t *vendor, const char *fmt, ...
 	va_list args;
 	char *buf;
 	wchar_t *buf16;
+	int ret;
 
 	va_start(args, fmt);
 	buf = xvasprintf(fmt, args);
 	va_end(args);
 	buf16 = xstrdup_char_to_wchar(buf);
 
-	return efi_set_variable(name, vendor,
+	ret = efi_set_variable(name, vendor,
 				EFI_VARIABLE_BOOTSERVICE_ACCESS |
 				EFI_VARIABLE_RUNTIME_ACCESS, buf16,
 				(strlen(buf)+1) * sizeof(wchar_t));
 	free(buf);
 	free(buf16);
+
+	return ret;
 }
 
 int efi_set_variable_uint64_le(char *name, efi_guid_t *vendor, uint64_t value)

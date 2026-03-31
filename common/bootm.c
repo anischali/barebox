@@ -11,7 +11,9 @@
 #include <memory.h>
 #include <block.h>
 #include <libfile.h>
+#include <bootm-fit.h>
 #include <image-fit.h>
+#include <bootm-uimage.h>
 #include <globalvar.h>
 #include <init.h>
 #include <environment.h>
@@ -31,7 +33,7 @@ static bool uimage_check(struct image_handler *handler,
 			 enum filetype detected_filetype)
 {
 	return detected_filetype == filetype_uimage &&
-		handler->ih_os == data->os->header.ih_os;
+		handler->ih_os == data->os_uimage->header.ih_os;
 }
 
 static bool filetype_check(struct image_handler *handler,
@@ -206,7 +208,7 @@ static int uimage_part_num(const char *partname)
 
 static inline bool image_is_uimage(struct image_data *data)
 {
-	return IS_ENABLED(CONFIG_BOOTM_UIMAGE) && data->os;
+	return IS_ENABLED(CONFIG_BOOTM_UIMAGE) && data->os_uimage;
 }
 
 static bool bootm_get_override(char **oldpath, const char *newpath)
@@ -226,252 +228,128 @@ static bool bootm_get_override(char **oldpath, const char *newpath)
 	return true;
 }
 
-/*
+/**
  * bootm_load_os() - load OS to RAM
- *
  * @data:		image data context
  * @load_address:	The address where the OS should be loaded to
+ * @end_address:	The end address of the load buffer (inclusive)
  *
  * This loads the OS to a RAM location. load_address must be a valid
- * address. If the image_data doesn't have a OS specified it's considered
+ * address. If the image_data doesn't have an OS specified it's considered
  * an error.
  *
- * Return: 0 on success, negative error code otherwise
+ * Return: the OS resource on success, or an error pointer on failure
  */
-int bootm_load_os(struct image_data *data, unsigned long load_address)
+const struct resource *bootm_load_os(struct image_data *data,
+		ulong load_address, ulong end_address)
 {
+	int err;
+
 	if (data->os_res)
-		return 0;
+		return data->os_res;
 
 	if (load_address == UIMAGE_INVALID_ADDRESS)
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
+	if (end_address <= load_address)
+		return ERR_PTR(-EINVAL);
 
 	if (data->os_fit) {
-		const void *kernel = data->fit_kernel;
-		unsigned long kernel_size = data->fit_kernel_size;
-
-		data->os_res = request_sdram_region("kernel",
-				load_address, kernel_size,
-				MEMTYPE_LOADER_CODE, MEMATTRS_RWX);
-		if (!data->os_res) {
-			pr_err("unable to request SDRAM region for kernel at"
-					" 0x%08llx-0x%08llx\n",
-				(unsigned long long)load_address,
-				(unsigned long long)load_address + kernel_size - 1);
-			return -ENOMEM;
-		}
-		zero_page_memcpy((void *)load_address, kernel, kernel_size);
-		return 0;
-	}
-
-	if (image_is_uimage(data)) {
-		int num;
-
-		num = uimage_part_num(data->os_part);
-
-		data->os_res = uimage_load_to_sdram(data->os,
-			num, load_address);
-		if (!data->os_res)
-			return -ENOMEM;
-
-		return 0;
-	}
-
-	if (!data->os_file)
-		return -EINVAL;
-
-	data->os_res = file_to_sdram(data->os_file, load_address, MEMTYPE_LOADER_CODE);
-	if (!data->os_res)
-		return -ENOMEM;
-
-	return 0;
-}
-
-static bool fitconfig_has_ramdisk(struct image_data *data)
-{
-	if (!IS_ENABLED(CONFIG_FITIMAGE) || !data->os_fit)
-		return false;
-
-	return fit_has_image(data->os_fit, data->fit_config, "ramdisk");
-}
-
-static int bootm_open_initrd_uimage(struct image_data *data)
-{
-	int ret;
-
-	if (!IS_ENABLED(CONFIG_BOOTM_UIMAGE))
-		return -ENOSYS;
-
-	if (strcmp(data->os_file, data->initrd_file)) {
-		data->initrd = uimage_open(data->initrd_file);
-		if (!data->initrd)
-			return -EINVAL;
-
-		if (bootm_get_verify_mode() > BOOTM_VERIFY_NONE) {
-			ret = uimage_verify(data->initrd);
-			if (ret) {
-				pr_err("Checking data crc failed with %pe\n",
-					ERR_PTR(ret));
-				return ret;
-			}
-		}
-		uimage_print_contents(data->initrd);
+		err = bootm_load_fit_os(data, load_address);
+	} else if (image_is_uimage(data)) {
+		err = bootm_load_uimage_os(data, load_address);
+	} else if (data->os_file) {
+		data->os_res = file_to_sdram(data->os_file, load_address, MEMTYPE_LOADER_CODE);
+		err = data->os_res ? 0 : -EBUSY;
 	} else {
-		data->initrd = data->os;
+		err = -EINVAL;
 	}
 
-	return 0;
+	if (err)
+		return ERR_PTR(err);
+
+	/* FIXME: We need some more rework to be able to detect this overflow
+	 * before it happens, but for now, let's at least detect it.
+	 */
+	if (WARN_ON(data->os_res->end > end_address))
+		return ERR_PTR(-ENOSPC);
+
+	return data->os_res;
 }
 
-/*
+/**
  * bootm_load_initrd() - load initrd to RAM
- *
  * @data:		image data context
  * @load_address:	The address where the initrd should be loaded to
+ * @end_address:	The end address of the load buffer (inclusive)
  *
  * This loads the initrd to a RAM location. load_address must be a valid
- * address. If the image_data doesn't have a initrd specified this function
- * still returns successful as an initrd is optional. Check data->initrd_res
- * to see if an initrd has been loaded.
+ * address. If the image_data doesn't have an initrd specified this function
+ * still returns successful as an initrd is optional.
  *
- * Return: 0 on success, negative error code otherwise
+ * Return: the initrd resource if one was loaded, NULL if no initrd was
+ *         specified, or an error pointer on failure
  */
 const struct resource *
-bootm_load_initrd(struct image_data *data, unsigned long load_address)
+bootm_load_initrd(struct image_data *data, ulong load_address, ulong end_address)
 {
-	enum filetype type;
+	struct resource *res = NULL;
+	const char *initrd, *initrd_part = NULL;
+	enum filetype type = filetype_unknown;
 	int ret;
 
 	if (!IS_ENABLED(CONFIG_BOOTM_INITRD))
 		return NULL;
 
-	if (bootm_get_override(&data->initrd_file, bootm_overrides.initrd_file))
-		goto initrd_file;
-
-	if (data->initrd_res)
+	/* TODO: This should not be set anywhere, but in case it is, let's print
+	 * a warning to find out if we need this
+	 */
+	if (WARN_ON(data->initrd_res))
 		return data->initrd_res;
+	if (end_address <= load_address)
+		return ERR_PTR(-EINVAL);
 
-	if (fitconfig_has_ramdisk(data)) {
-		const void *initrd;
-		unsigned long initrd_size;
+	bootm_get_override(&data->initrd_file, bootm_overrides.initrd_file);
 
-		ret = fit_open_image(data->os_fit, data->fit_config, "ramdisk",
-				     &initrd, &initrd_size);
+	initrd = data->initrd_file;
+	if (initrd) {
+		ret = file_name_detect_type(initrd, &type);
 		if (ret) {
-			pr_err("Cannot open ramdisk image in FIT image: %pe\n",
-					ERR_PTR(ret));
+			pr_err("could not open initrd \"%s\": %pe\n",
+			       initrd, ERR_PTR(ret));
 			return ERR_PTR(ret);
 		}
-		data->initrd_res = request_sdram_region("initrd",
-				load_address, initrd_size,
-				MEMTYPE_LOADER_DATA, MEMATTRS_RW);
-		if (!data->initrd_res) {
-			pr_err("unable to request SDRAM region for initrd at"
-					" 0x%08llx-0x%08llx\n",
-				(unsigned long long)load_address,
-				(unsigned long long)load_address + initrd_size - 1);
-			return ERR_PTR(-ENOMEM);
-		}
-		memcpy((void *)load_address, initrd, initrd_size);
-		pr_info("Loaded initrd from FIT image\n");
-		goto done1;
-	}
-
-initrd_file:
-	if (!data->initrd_file)
-		return NULL;
-
-	ret = file_name_detect_type(data->initrd_file, &type);
-	if (ret) {
-		pr_err("could not open initrd \"%s\": %pe\n", data->initrd_file, ERR_PTR(ret));
-		return ERR_PTR(ret);
 	}
 
 	if (type == filetype_uimage) {
-		int num;
-		ret = bootm_open_initrd_uimage(data);
-		if (ret) {
-			pr_err("loading initrd failed with %pe\n", ERR_PTR(ret));
-			return ERR_PTR(ret);
-		}
+		res = bootm_load_uimage_initrd(data, load_address);
+		if (data->initrd_uimage->header.ih_type == IH_TYPE_MULTI)
+			initrd_part = data->initrd_part;
 
-		num = uimage_part_num(data->initrd_part);
+	} else if (initrd) {
+		res = file_to_sdram(initrd, load_address, MEMTYPE_LOADER_DATA)
+			?: ERR_PTR(-EBUSY);
 
-		data->initrd_res = uimage_load_to_sdram(data->initrd,
-			num, load_address);
-		if (!data->initrd_res)
-			return ERR_PTR(-ENOMEM);
-
-		goto done;
+	} else if (data->os_fit) {
+		res = bootm_load_fit_initrd(data, load_address);
+		type = filetype_fit;
 	}
 
-	data->initrd_res = file_to_sdram(data->initrd_file, load_address, MEMTYPE_LOADER_DATA);
-	if (!data->initrd_res)
-		return ERR_PTR(-ENOMEM);
+	if (IS_ERR_OR_NULL(res))
+		return res;
 
-done:
+	/* FIXME: We need some more rework to be able to detect this overflow
+	 * before it happens, but for now, let's at least detect it.
+	 */
+	if (WARN_ON(res->end > end_address))
+		return ERR_PTR(-ENOSPC);
 
-	pr_info("Loaded initrd %s '%s'", file_type_to_string(type),
-	       data->initrd_file);
-	if (type == filetype_uimage && data->initrd->header.ih_type == IH_TYPE_MULTI)
-		pr_info(", multifile image %s", data->initrd_part);
-	pr_info("\n");
-done1:
-	pr_info("initrd is at %pa-%pa\n",
-		&data->initrd_res->start,
-		&data->initrd_res->end);
+	pr_info("Loaded initrd from %s %s%s%s to %pa-%pa\n",
+		file_type_to_string(type), initrd ?: "",
+		initrd_part ? "@" : "", initrd_part ?: "",
+		&res->start, &res->end);
 
+	data->initrd_res = res;
 	return data->initrd_res;
-}
-
-static int bootm_open_oftree_uimage(struct image_data *data, size_t *size,
-				    struct fdt_header **fdt)
-{
-	enum filetype ft;
-	const char *oftree = data->oftree_file;
-	int num = uimage_part_num(data->oftree_part);
-	struct uimage_handle *of_handle;
-	int release = 0;
-
-	pr_info("Loading devicetree from '%s'@%d\n", oftree, num);
-
-	if (!IS_ENABLED(CONFIG_BOOTM_OFTREE_UIMAGE))
-		return -EINVAL;
-
-	if (!strcmp(data->os_file, oftree)) {
-		of_handle = data->os;
-	} else if (!strcmp(data->initrd_file, oftree)) {
-		of_handle = data->initrd;
-	} else {
-		of_handle = uimage_open(oftree);
-		if (!of_handle)
-			return -ENODEV;
-		uimage_print_contents(of_handle);
-		release = 1;
-	}
-
-	*fdt = uimage_load_to_buf(of_handle, num, size);
-
-	if (release)
-		uimage_close(of_handle);
-
-	ft = file_detect_type(*fdt, *size);
-	if (ft != filetype_oftree) {
-		pr_err("%s is not an oftree but %s\n",
-			data->oftree_file, file_type_to_string(ft));
-		free(*fdt);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static bool fitconfig_has_fdt(struct image_data *data)
-{
-	if (!IS_ENABLED(CONFIG_FITIMAGE) || !data->os_fit)
-		return false;
-
-	return fit_has_image(data->os_fit, data->fit_config, "fdt");
 }
 
 /*
@@ -496,20 +374,12 @@ void *bootm_get_devicetree(struct image_data *data)
 	if (!IS_ENABLED(CONFIG_OFTREE))
 		return ERR_PTR(-ENOSYS);
 
-	from_fit = fitconfig_has_fdt(data);
+	from_fit = bootm_fit_has_fdt(data);
 	if (bootm_get_override(&data->oftree_file, bootm_overrides.oftree_file))
 		from_fit = false;
 
 	if (from_fit) {
-		const void *of_tree;
-		unsigned long of_size;
-
-		ret = fit_open_image(data->os_fit, data->fit_config, "fdt",
-				     &of_tree, &of_size);
-		if (ret)
-			return ERR_PTR(ret);
-
-		data->of_root_node = of_unflatten_dtb(of_tree, of_size);
+		data->of_root_node = bootm_get_fit_devicetree(data);
 	} else if (data->oftree_file) {
 		size_t size;
 
@@ -574,38 +444,38 @@ void *bootm_get_devicetree(struct image_data *data)
 	return oftree;
 }
 
-/*
- * bootm_load_devicetree() - load devicetree
- *
+/**
+ * bootm_load_devicetree() - load devicetree into specified memory range
  * @data:		image data context
  * @fdt:		The flat device tree to load
  * @load_address:	The address where the devicetree should be loaded to
+ * @end_address:	The end address of the load buffer (inclusive)
  *
  * This loads the devicetree to a RAM location. load_address must be a valid
  * address which is requested with request_sdram_region. The associated region
  * is released automatically in the bootm error path.
  *
- * Return: 0 on success, negative error code otherwise
+ * Return: the devicetree resource on success, or an error pointer on failure
  */
-int bootm_load_devicetree(struct image_data *data, void *fdt,
-			    unsigned long load_address)
+const struct resource *
+bootm_load_devicetree(struct image_data *data, void *fdt,
+		      ulong load_address, ulong end_address)
 {
 	int fdt_size;
 
 	if (!IS_ENABLED(CONFIG_OFTREE))
-		return -ENOSYS;
+		return ERR_PTR(-ENOSYS);
+	if (end_address <= load_address)
+		return ERR_PTR(-EINVAL);
 
 	fdt_size = be32_to_cpu(((struct fdt_header *)fdt)->totalsize);
+	if (load_address + fdt_size - 1 > end_address)
+		return ERR_PTR(-ENOSPC);
 
 	data->oftree_res = request_sdram_region("oftree", load_address,
 			fdt_size, MEMTYPE_LOADER_DATA, MEMATTRS_RW);
-	if (!data->oftree_res) {
-		pr_err("unable to request SDRAM region for device tree at"
-				" 0x%08llx-0x%08llx\n",
-			(unsigned long long)load_address,
-			(unsigned long long)load_address + fdt_size - 1);
-		return -ENOMEM;
-	}
+	if (!data->oftree_res)
+		return ERR_PTR(-EBUSY);
 
 	memcpy((void *)data->oftree_res->start, fdt, fdt_size);
 
@@ -615,7 +485,7 @@ int bootm_load_devicetree(struct image_data *data, void *fdt,
 		fdt_print_reserve_map(fdt);
 	}
 
-	return 0;
+	return data->oftree_res;
 }
 
 int bootm_get_os_size(struct image_data *data)
@@ -625,7 +495,7 @@ int bootm_get_os_size(struct image_data *data)
 	int ret;
 
 	if (image_is_uimage(data))
-		return uimage_get_size(data->os, uimage_part_num(data->os_part));
+		return uimage_get_size(data->os_uimage, uimage_part_num(data->os_part));
 	if (data->os_fit)
 		return data->fit_kernel_size;
 	if (!data->os_file)
@@ -637,114 +507,6 @@ int bootm_get_os_size(struct image_data *data)
 		return ret;
 
 	return s.st_size;
-}
-
-static int bootm_open_os_uimage(struct image_data *data)
-{
-	int ret;
-
-	if (!IS_ENABLED(CONFIG_BOOTM_UIMAGE))
-		return -ENOSYS;
-
-	data->os = uimage_open(data->os_file);
-	if (!data->os)
-		return -EINVAL;
-
-	if (bootm_get_verify_mode() > BOOTM_VERIFY_NONE) {
-		ret = uimage_verify(data->os);
-		if (ret) {
-			pr_err("Checking data crc failed with %pe\n",
-					ERR_PTR(ret));
-			return ret;
-		}
-	}
-
-	uimage_print_contents(data->os);
-
-	if (IH_ARCH == IH_ARCH_INVALID || data->os->header.ih_arch != IH_ARCH) {
-		pr_err("Unsupported Architecture 0x%x\n",
-		       data->os->header.ih_arch);
-		return -EINVAL;
-	}
-
-	if (data->os_address == UIMAGE_SOME_ADDRESS)
-		data->os_address = data->os->header.ih_load;
-
-	return 0;
-}
-
-static bool bootm_fit_config_valid(struct fit_handle *fit,
-				   struct device_node *config)
-{
-	/*
-	 * Consider only FIT configurations which do provide a loadable kernel
-	 * image.
-	 */
-	return !!fit_has_image(fit, config, "kernel");
-}
-
-static int bootm_open_fit(struct image_data *data)
-{
-	struct fit_handle *fit;
-	struct fdt_header *header;
-	static const char *kernel_img = "kernel";
-	size_t flen, hlen;
-	int ret;
-
-	if (!IS_ENABLED(CONFIG_FITIMAGE))
-		return -ENOSYS;
-
-	header = (struct fdt_header *)data->os_header;
-	flen = bootm_get_os_size(data);
-	hlen = fdt32_to_cpu(header->totalsize);
-
-	fit = fit_open(data->os_file, data->verbose, data->verify,
-		       min(flen, hlen));
-	if (IS_ERR(fit)) {
-		pr_err("Loading FIT image %s failed with: %pe\n", data->os_file, fit);
-		return PTR_ERR(fit);
-	}
-
-	data->os_fit = fit;
-
-	data->fit_config = fit_open_configuration(data->os_fit,
-						  data->os_part,
-						  bootm_fit_config_valid);
-	if (IS_ERR(data->fit_config)) {
-		pr_err("Cannot open FIT image configuration '%s'\n",
-		       data->os_part ? data->os_part : "default");
-		return PTR_ERR(data->fit_config);
-	}
-
-	ret = fit_open_image(data->os_fit, data->fit_config, kernel_img,
-			     &data->fit_kernel, &data->fit_kernel_size);
-	if (ret)
-		return ret;
-	if (data->os_address == UIMAGE_SOME_ADDRESS) {
-		ret = fit_get_image_address(data->os_fit,
-					    data->fit_config,
-					    kernel_img,
-					    "load", &data->os_address);
-		if (!ret)
-			pr_info("Load address from FIT '%s': 0x%lx\n",
-				kernel_img, data->os_address);
-		/* Note: Error case uses default value. */
-	}
-	if (data->os_entry == UIMAGE_SOME_ADDRESS) {
-		unsigned long entry;
-		ret = fit_get_image_address(data->os_fit,
-					    data->fit_config,
-					    kernel_img,
-					    "entry", &entry);
-		if (!ret) {
-			data->os_entry = entry - data->os_address;
-			pr_info("Entry address from FIT '%s': 0x%lx\n",
-				kernel_img, entry);
-		}
-		/* Note: Error case uses default value. */
-	}
-
-	return 0;
 }
 
 static void bootm_print_info(struct image_data *data)
@@ -780,6 +542,33 @@ static int bootm_image_name_and_part(const char *name, char **filename, char **p
 	return 0;
 }
 
+/**
+ * file_read_and_detect_boot_image_type - read file header and detect image type
+ * @os_file: path to the boot image file
+ * @os_header: returns a PAGE_SIZE buffer with the file header (caller frees)
+ *
+ * Return: detected filetype (enum filetype) on success, negative error code
+ *         on failure. On error, *os_header is set to NULL.
+ */
+int file_read_and_detect_boot_image_type(const char *os_file, void **os_header)
+{
+	size_t size;
+	int ret;
+
+	ret = read_file_2(os_file, &size, os_header, PAGE_SIZE);
+	if (ret < 0 && ret != -EFBIG) {
+		pr_err("could not open %s: %pe\n", os_file, ERR_PTR(ret));
+		return ret;
+	}
+	if (size < PAGE_SIZE) {
+		free(*os_header);
+		*os_header = NULL;
+		return -ENODATA;
+	}
+
+	return file_detect_boot_image_type(*os_header, PAGE_SIZE);
+}
+
 /*
  * bootm_boot - Boot an application image described by bootm_data
  */
@@ -788,9 +577,7 @@ int bootm_boot(struct bootm_data *bootm_data)
 	struct image_data *data;
 	struct image_handler *handler;
 	int ret;
-	enum filetype os_type;
-	size_t size;
-	const char *os_type_str;
+	const char *image_type_str;
 
 	if (!bootm_data->os_file) {
 		pr_err("no image given\n");
@@ -813,17 +600,12 @@ int bootm_boot(struct bootm_data *bootm_data)
 	data->os_entry = bootm_data->os_entry;
 	data->efi_boot = bootm_data->efi_boot;
 
-	ret = read_file_2(data->os_file, &size, &data->os_header, PAGE_SIZE);
-	if (ret < 0 && ret != -EFBIG) {
-		pr_err("could not open %s: %pe\n", data->os_file, ERR_PTR(ret));
+	ret = file_read_and_detect_boot_image_type(data->os_file, &data->os_header);
+	if (ret < 0)
 		goto err_out;
-	}
-	if (size < PAGE_SIZE)
-		goto err_out;
+	data->image_type = ret;
 
-	os_type = data->os_type = file_detect_type(data->os_header, PAGE_SIZE);
-
-	if (!data->force && os_type == filetype_unknown) {
+	if (!data->force && data->image_type == filetype_unknown) {
 		pr_err("Unknown OS filetype (try -f)\n");
 		ret = -EINVAL;
 		goto err_out;
@@ -839,23 +621,24 @@ int bootm_boot(struct bootm_data *bootm_data)
 		data->oftree_file = NULL;
 		data->initrd_file = NULL;
 		data->tee_file = NULL;
-		if (os_type != filetype_oftree) {
+		if (data->image_type != filetype_fit) {
 			pr_err("Signed boot and image is no FIT image, aborting\n");
 			ret = -EINVAL;
 			goto err_out;
 		}
 	}
 
-	os_type_str = file_type_to_short_string(os_type);
+	image_type_str = file_type_to_short_string(data->image_type);
 
-	switch (os_type) {
-	case filetype_oftree:
+	/* May be updated by below container-specific handlers */
+	data->kernel_type = data->image_type;
+
+	switch (data->image_type) {
+	case filetype_fit:
 		ret = bootm_open_fit(data);
-		os_type = file_detect_type(data->fit_kernel, data->fit_kernel_size);
-		os_type_str = "FIT";
 		break;
 	case filetype_uimage:
-		ret = bootm_open_os_uimage(data);
+		ret = bootm_open_uimage(data);
 		break;
 	default:
 		ret = 0;
@@ -863,7 +646,7 @@ int bootm_boot(struct bootm_data *bootm_data)
 	}
 
 	if (ret) {
-		pr_err("Loading %s image failed with: %pe\n", os_type_str, ERR_PTR(ret));
+		pr_err("Loading %s image failed with: %pe\n", image_type_str, ERR_PTR(ret));
 		goto err_out;
 	}
 
@@ -976,10 +759,10 @@ int bootm_boot(struct bootm_data *bootm_data)
 		free(hostname_bootarg);
 	}
 
-	pr_info("\nLoading %s '%s'", file_type_to_string(os_type),
+	pr_info("\nLoading %s '%s'", file_type_to_string(data->kernel_type),
 		data->os_file);
-	if (os_type == filetype_uimage &&
-			data->os->header.ih_type == IH_TYPE_MULTI)
+	if (data->kernel_type == filetype_uimage &&
+			data->os_uimage->header.ih_type == IH_TYPE_MULTI)
 		pr_info(", multifile image %d", uimage_part_num(data->os_part));
 	pr_info("\n");
 
@@ -988,12 +771,12 @@ int bootm_boot(struct bootm_data *bootm_data)
 	if (data->os_entry == UIMAGE_SOME_ADDRESS)
 		data->os_entry = 0;
 
-	handler = bootm_find_handler(os_type, data);
+	handler = bootm_find_handler(data->kernel_type, data);
 	if (!handler) {
 		pr_err("no image handler found for image type %s\n",
-		       file_type_to_string(os_type));
-		if (os_type == filetype_uimage)
-			pr_err("and OS type: %d\n", data->os->header.ih_os);
+		       file_type_to_string(data->kernel_type));
+		if (data->kernel_type == filetype_uimage)
+			pr_err("and OS type: %d\n", data->os_uimage->header.ih_os);
 		ret = -ENODEV;
 		goto err_out;
 	}
@@ -1006,10 +789,8 @@ int bootm_boot(struct bootm_data *bootm_data)
 	bootm_get_override(&data->oftree_file, bootm_overrides.oftree_file);
 
 	if (bootm_get_override(&data->initrd_file, bootm_overrides.initrd_file)) {
-		if (data->initrd_res) {
-			release_sdram_region(data->initrd_res);
-			data->initrd_res = NULL;
-		}
+		release_sdram_region(data->initrd_res);
+		data->initrd_res = NULL;
 	}
 
 	ret = handler->bootm(data);
@@ -1017,21 +798,16 @@ int bootm_boot(struct bootm_data *bootm_data)
 		pr_info("Dryrun. Aborted\n");
 
 err_out:
-	if (data->os_res)
-		release_sdram_region(data->os_res);
+	release_sdram_region(data->os_res);
 	if (data->initrd_res)
-		release_sdram_region(data->initrd_res);
-	if (data->oftree_res)
-		release_sdram_region(data->oftree_res);
-	if (data->tee_res)
-		release_sdram_region(data->tee_res);
-	if (image_is_uimage(data)) {
-		if (data->initrd && data->initrd != data->os)
-			uimage_close(data->initrd);
-		uimage_close(data->os);
-	}
-	if (IS_ENABLED(CONFIG_FITIMAGE) && data->os_fit)
-		fit_close(data->os_fit);
+		of_del_reserve_entry(data->initrd_res->start, data->initrd_res->end);
+	release_sdram_region(data->initrd_res);
+	release_sdram_region(data->oftree_res);
+	release_sdram_region(data->tee_res);
+	if (image_is_uimage(data))
+		bootm_close_uimage(data);
+	if (data->os_fit)
+		bootm_close_fit(data);
 	if (data->of_root_node)
 		of_delete_node(data->of_root_node);
 
@@ -1048,12 +824,16 @@ err_out:
 }
 
 #ifdef CONFIG_BOOT_OVERRIDE
-struct bootm_overrides bootm_set_overrides(const struct bootm_overrides overrides)
+struct bootm_overrides bootm_save_overrides(const struct bootm_overrides overrides)
 {
 	struct bootm_overrides old = bootm_overrides;
 	/* bootm_merge_overrides copies only actual (non-NULL) overrides */
 	bootm_merge_overrides(&bootm_overrides, &overrides);
 	return old;
+}
+void bootm_restore_overrides(const struct bootm_overrides overrides)
+{
+	bootm_overrides = overrides;
 }
 #endif
 

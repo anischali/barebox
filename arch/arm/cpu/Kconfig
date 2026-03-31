@@ -4,7 +4,7 @@ comment "Processor Type"
 
 config CPU_32
 	bool
-	select HAS_MODULES
+	select HAS_MODULES if !ARM_MMU_PERMISSIONS
 	select HAVE_MOD_ARCH_SPECIFIC
 	select HAS_DMA
 	select ARCH_HAS_ZERO_PAGE
@@ -82,6 +82,16 @@ config CPU_V7
 	bool "Generic ARMv7 support"
 	depends on 32BIT
 	select CPU_32v7
+
+config CPU_V7VE
+	bool "ARMv7 Virtualization Extensions Support"
+	depends on CPU_V7
+	default y
+	help
+	  Say y here if it's possible for your CPU to be in HYP (hypervisor)
+	  mode when entering barebox.
+
+	  If unsure, say y.
 
 # ARMv8
 config CPU_V8

@@ -41,6 +41,7 @@ lwl-$(CONFIG_MACH_GRINN_LITEBOARD) += imx6ul-liteboard.dtb.o
 lwl-$(CONFIG_MACH_GUF_SANTARO) += imx6q-guf-santaro.dtb.o
 lwl-$(CONFIG_MACH_GUF_VINCELL) += imx53-guf-vincell.dtb.o imx53-guf-vincell-lt.dtb.o
 lwl-$(CONFIG_MACH_GW_VENTANA) += imx6q-gw54xx.dtb.o
+lwl-$(CONFIG_MACH_HGS_GS05) += imx8mm-hgs-gs05.dtb.o
 lwl-$(CONFIG_MACH_KAMSTRUP_MX7_CONCENTRATOR) += imx7d-flex-concentrator-mfg.dtb.o
 lwl-$(CONFIG_MACH_KARO_QSXP_ML81) += imx8mp-karo-qsxp-ml81-qsbase4.dtb.o
 lwl-$(CONFIG_MACH_KOENIGBAUER_ALPHAJET) += imx8mp-koenigbauer-alphajet.dtb.o
@@ -118,8 +119,8 @@ lwl-$(CONFIG_MACH_PROTONIC_IMX6) += \
 lwl-$(CONFIG_MACH_PROTONIC_IMX8M) += \
 	imx8mm-prt8mm.dtb.o \
 	imx8mp-prt8ml.dtb.o
-lwl-$(CONFIG_MACH_PROTONIC_MECSBC) += rk3568-mecsbc.dtb.o
 lwl-$(CONFIG_MACH_PROTONIC_PRTPUK) += rk3576-prtpuk.dtb.o
+lwl-$(CONFIG_MACH_PROTONIC_RK356X) += rk3568-mecsbc.dtb.o
 lwl-$(CONFIG_MACH_PROTONIC_STM32MP1) += \
 	stm32mp151-prtt1a.dtb.o \
 	stm32mp151-prtt1c.dtb.o \
@@ -130,6 +131,7 @@ lwl-$(CONFIG_MACH_PROTONIC_STM32MP1) += \
 lwl-$(CONFIG_MACH_PROTONIC_STM32MP13) += \
 	stm32mp133c-mect1s.dtb.o \
 	stm32mp133c-prihmb.dtb.o
+lwl-$(CONFIG_MACH_QNAP_TSX33) += rk3568-qnap-ts433.dtb.o rk3568-qnap-ts433eu.dtb.o
 lwl-$(CONFIG_MACH_RADXA_ROCK) += rk3188-radxarock.dtb.o
 lwl-$(CONFIG_MACH_RADXA_ROCK3) += rk3568-rock-3a.dtb.o
 lwl-$(CONFIG_MACH_RADXA_ROCK5) += \
@@ -138,7 +140,9 @@ lwl-$(CONFIG_MACH_RADXA_ROCK5) += \
 lwl-$(CONFIG_MACH_RADXA_CM3) += rk3566-cm3-io.dtb.o
 lwl-$(CONFIG_MACH_PHYTEC_SOM_RK3288) += rk3288-phycore-som.dtb.o
 lwl-$(CONFIG_MACH_REALQ7) += imx6q-dmo-edmqmx6.dtb.o
+lwl-$(CONFIG_MACH_RK3562_EVB2) += rk3562-evb2-v10.dtb.o
 lwl-$(CONFIG_MACH_RK3568_EVB) += rk3568-evb1-v10.dtb.o
+lwl-$(CONFIG_MACH_RK3562_KICKPI_K3) += rk3562-kickpi-k3.dtb.o
 lwl-$(CONFIG_MACH_RK3568_BPI_R2PRO) += rk3568-bpi-r2-pro.dtb.o
 lwl-$(CONFIG_MACH_RPI) += bcm2835-rpi.dtb.o
 lwl-$(CONFIG_MACH_RPI2) += bcm2836-rpi-2.dtb.o
@@ -184,7 +188,7 @@ lwl-$(CONFIG_MACH_NXP_IMX8MP_EVK) += imx8mp-evk.dtb.o
 lwl-$(CONFIG_MACH_NXP_IMX8MQ_EVK) += imx8mq-evk.dtb.o
 lwl-$(CONFIG_MACH_NXP_IMX93_FRDM) += imx93-frdm.dtb.o
 lwl-$(CONFIG_MACH_INNOCOMM_WB15) += imx8mm-innocomm-wb15-evk.dtb.o
-lwl-$(CONFIG_MACH_TQ_MBA8MPXL) += imx8mp-tqma8mpql-mba8mpxl.dtb.o
+lwl-$(CONFIG_MACH_TQ_MBA8MPXX) += imx8mp-tqma8mpql-mba8mpxl.dtb.o imx8mp-tqma8mpqs-mba8mpxs.dtb.o
 lwl-$(CONFIG_MACH_TORADEX_COLIBRI_T20) += tegra20-colibri-iris.dtb.o
 lwl-$(CONFIG_MACH_TORADEX_COLIBRI_IMX6) += imx6dl-colibri-iris.dtb.o
 lwl-$(CONFIG_MACH_TOSHIBA_AC100) += tegra20-paz00.dtb.o

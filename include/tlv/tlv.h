@@ -37,13 +37,13 @@ extern int tlv_format_hex(struct tlv_device *dev, struct tlv_mapping *map, u16 l
 extern int tlv_format_mac(struct tlv_device *dev, struct tlv_mapping *map, u16 len, const u8 *val);
 extern int tlv_format_blob(struct tlv_device *dev, struct tlv_mapping *map, u16 len, const u8 *val);
 extern int tlv_handle_serial(struct tlv_device *dev, struct tlv_mapping *map, u16 len, const u8 *val);
+extern int tlv_bind_soc_uid(struct tlv_device *dev, struct tlv_mapping *map, u16 len, const u8 *val);
 extern int tlv_handle_eth_address(struct tlv_device *dev, struct tlv_mapping *map, u16 len, const u8 *val);
 extern int tlv_handle_eth_address_seq(struct tlv_device *dev, struct tlv_mapping *map, u16 len, const u8 *val);
 
 struct tlv_decoder {
 	u32 magic;
 	const char *signature_keyring;
-	void *driverata;
 	struct tlv_mapping **mappings;
 	struct driver driver;
 	/* private members */
@@ -61,7 +61,8 @@ static inline struct device_node *tlv_of_node(struct tlv_device *tlvdev)
 	return tlvdev->dev.device_node;
 }
 
-struct tlv_device *tlv_register_device(struct tlv_header *header, struct device *parent);
+struct tlv_device *tlv_register_device(struct tlv_header *header, size_t size,
+				       struct device *parent);
 static inline struct tlv_header *tlv_device_header(struct tlv_device *tlvdev)
 {
 	return tlvdev->dev.platform_data;

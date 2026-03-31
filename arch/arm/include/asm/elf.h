@@ -29,25 +29,35 @@ typedef struct user_fp elf_fpregset_t;
 
 #define R_ARM_NONE	0
 #define R_ARM_PC24	1
+#define R_ARM_REL32	3
 #define R_ARM_ABS32	2
 #define R_ARM_CALL	28
 #define R_ARM_JUMP24	29
+#define R_ARM_PREL31	42
 
 #define R_ARM_THM_CALL		10
 #define R_ARM_THM_JUMP24	30
 
+/* Additional relocation types for dynamic linking */
+#define R_ARM_RELATIVE		23
+
+#define R_AARCH64_NONE		0
+#define R_AARCH64_ABS64		257
+#define R_AARCH64_RELATIVE	1027
+
 /*
  * These are used to set parameters in the core dumps.
  */
-#define ELF_CLASS	ELFCLASS32
 #ifdef __ARMEB__
 #define ELF_DATA	ELFDATA2MSB
 #else
 #define ELF_DATA	ELFDATA2LSB
 #endif
 #ifdef CONFIG_CPU_64
+#define ELF_CLASS	ELFCLASS64
 #define ELF_ARCH	EM_AARCH64
 #else
+#define ELF_CLASS	ELFCLASS32
 #define ELF_ARCH	EM_ARM
 #endif
 

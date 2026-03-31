@@ -16,11 +16,15 @@
 #include <mach/rockchip/dmc.h>
 #include <mach/rockchip/atf.h>
 #include <mach/rockchip/rk3399-regs.h>
+#include <mach/rockchip/rk3562-regs.h>
 #include <mach/rockchip/rk3568-regs.h>
 #include <mach/rockchip/rk3576-regs.h>
 
 #define RK3399_PMUGRF_OS_REG2		0x308
 #define RK3399_PMUGRF_OS_REG3		0x30C
+
+#define RK3562_PMUGRF_OS_REG2           0x208
+#define RK3562_PMUGRF_OS_REG3           0x20c
 
 #define RK3568_PMUGRF_OS_REG2           0x208
 #define RK3568_PMUGRF_OS_REG3           0x20c
@@ -29,6 +33,7 @@
 #define RK3576_PMUGRF_OS_REG3           0x20c
 
 #define RK3399_INT_REG_START		0xf0000000
+#define RK3562_INT_REG_START		RK3399_INT_REG_START
 #define RK3568_INT_REG_START		RK3399_INT_REG_START
 #define RK3576_INT_REG_START		0x10000000
 #define RK3588_INT_REG_START		RK3399_INT_REG_START
@@ -155,6 +160,23 @@ resource_size_t rk3399_ram0_size(void)
 	return size;
 }
 
+resource_size_t rk3562_ram0_size(void)
+{
+	void __iomem *pmugrf = IOMEM(RK3562_PMUGRF_BASE);
+	u32 sys_reg2, sys_reg3;
+	resource_size_t size;
+
+	sys_reg2 = readl(pmugrf + RK3562_PMUGRF_OS_REG2);
+	sys_reg3 = readl(pmugrf + RK3562_PMUGRF_OS_REG3);
+
+	size = rockchip_sdram_size(sys_reg2, sys_reg3);
+	size = min_t(resource_size_t, RK3562_INT_REG_START, size);
+
+	pr_debug("%s() = %llu\n", __func__, (u64)size);
+
+	return size;
+}
+
 resource_size_t rk3568_ram0_size(void)
 {
 	void __iomem *pmugrf = IOMEM(RK3568_PMUGRF_BASE);
@@ -215,8 +237,8 @@ size_t rk3588_ram_sizes(phys_addr_t *base, resource_size_t *size, size_t n)
 
 	memsize = size1 + size2;
 
-	base[i] = 0xa00000;
-	size[i] = min_t(resource_size_t, RK3588_INT_REG_START, memsize) - 0xa00000;
+	base[i] = RK3588_DRAM_BOTTOM;
+	size[i] = min_t(resource_size_t, RK3588_INT_REG_START, memsize) - RK3588_DRAM_BOTTOM;
 	i++;
 
 	if (i < n && memsize > SZ_4G) {
@@ -314,6 +336,13 @@ static const struct rockchip_dmc_drvdata rk3399_drvdata = {
 	.membase = RK3399_DRAM_BOTTOM,
 };
 
+static const struct rockchip_dmc_drvdata rk3562_drvdata = {
+	.os_reg2 = RK3562_PMUGRF_OS_REG2,
+	.os_reg3 = RK3562_PMUGRF_OS_REG3,
+	.internal_registers_start = RK3562_INT_REG_START,
+	.membase = RK3562_DRAM_BOTTOM,
+};
+
 static const struct rockchip_dmc_drvdata rk3568_drvdata = {
 	.os_reg2 = RK3568_PMUGRF_OS_REG2,
 	.os_reg3 = RK3568_PMUGRF_OS_REG3,
@@ -341,6 +370,10 @@ static struct of_device_id rockchip_dmc_dt_ids[] = {
 	{
 		.compatible = "rockchip,rk3399-dmc",
 		.data = &rk3399_drvdata,
+	},
+	{
+		.compatible = "rockchip,rk3562-dmc",
+		.data = &rk3562_drvdata,
 	},
 	{
 		.compatible = "rockchip,rk3568-dmc",

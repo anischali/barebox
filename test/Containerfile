@@ -10,7 +10,7 @@ LABEL Description="This image is for building and testing barebox inside a conta
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Update and install things from apt now
-RUN apt-get update && apt-get upgrade && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
 	bison \
 	build-essential \
 	coreutils \
@@ -21,6 +21,7 @@ RUN apt-get update && apt-get upgrade && apt-get install -y --no-install-recomme
 	libc6-i386 \
 	libgit2-dev \
 	libguestfs-tools \
+	genisoimage \
 	lz4 \
 	librsvg2-bin \
 	libseccomp-dev \
@@ -40,7 +41,9 @@ RUN apt-get update && apt-get upgrade && apt-get install -y --no-install-recomme
 	qemu-system-misc \
 	qemu-system-mips \
 	qemu-system-x86 \
+	qemu-system-ppc \
 	qemu-system-common \
+	qemu-efi-aarch64 \
 	ovmf \
 	python3 \
 	python3-crcmod \
@@ -63,8 +66,12 @@ RUN apt-get update && apt-get upgrade && apt-get install -y --no-install-recomme
 ENV GCC_VERSION=15.2.0
 ENV LLVM_VERSION=20
 
-RUN apt-get install -y --no-install-recommends lsb-release gnupg \
+RUN apt-get update && apt-get install -y --no-install-recommends lsb-release gnupg \
 	&& wget https://apt.llvm.org/llvm.sh \
+	&& mkdir -p /etc/crypto-policies/back-ends/ \
+	&& sed 's/\(sha1\.second_preimage_resistance = \)2026-02-01/\12026-06-01/' \
+	    < /usr/share/apt/default-sequoia.config \
+	    > /etc/crypto-policies/back-ends/apt-sequoia.config \
 	&& chmod +x llvm.sh && ./llvm.sh ${LLVM_VERSION} \
 	&& apt-get remove -y lsb-release gnupg \
 	&& apt-get autoremove -y --purge \
@@ -85,8 +92,6 @@ RUN tgz_checksum_dl() { set -e; wget -nv -O archive.tgz "$1"; \
     tgz_checksum_dl https://github.com/kalray/build-scripts/releases/download/v5.2.0/gcc-kalray-kvx-ubuntu-22.04-v5.2.0.tar.gz \
 		    f59964cac188f1e5a8f628d0abef68e3b6ceebdae18dff51625472329fe6ec40
 
-RUN wget -nv "https://github.com/qemu/qemu/blob/v10.1.0/pc-bios/opensbi-riscv32-generic-fw_dynamic.bin?raw=true" -O /usr/share/qemu/opensbi-riscv32-generic-fw_dynamic.bin
-
 # Create our user/group
 RUN useradd -m -U barebox
 RUN echo barebox ALL=NOPASSWD: ALL > /etc/sudoers.d/barebox
@@ -104,7 +109,7 @@ ENV CROSS_COMPILE_powerpc=/opt/gcc-${GCC_VERSION}-nolibc/powerpc-linux/bin/power
 ENV CROSS_COMPILE_riscv=/opt/gcc-${GCC_VERSION}-nolibc/riscv64-linux/bin/riscv64-linux-
 ENV CROSS_COMPILE_kvx=/opt/gcc-kalray-kvx-v5.2.0/bin/kvx-elf-
 
-ENV CROSS_COMPILE_llvm=-${LLVM_VERSION}
+ENV LLVM_SUFFIX=-${LLVM_VERSION}
 # Workaround for https://github.com/llvm/llvm-project/issues/112458
 RUN ln -Ts /usr/lib/llvm-${LLVM_VERSION}/lib/clang/${LLVM_VERSION}/lib/linux/ \
            /usr/lib/llvm-${LLVM_VERSION}/lib/clang/${LLVM_VERSION}/lib/x86_64-pc-linux-gnu

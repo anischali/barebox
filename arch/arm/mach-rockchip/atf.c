@@ -11,6 +11,7 @@
 #include <mach/rockchip/dmc.h>
 #include <mach/rockchip/rockchip.h>
 #include <mach/rockchip/bootrom.h>
+#include <mach/rockchip/rk3562-regs.h>
 #include <mach/rockchip/rk3568-regs.h>
 #include <mach/rockchip/rk3576-regs.h>
 #include <mach/rockchip/rk3588-regs.h>
@@ -132,6 +133,43 @@ static uintptr_t rk_load_optee(uintptr_t bl32, const void *bl32_image,
 		   SOC##_BAREBOX_LOAD_ADDRESS, (uintptr_t)fdt);                 \
 } while (0)                                                                     \
 
+void rk3562_atf_load_bl31(void *fdt)
+{
+	rockchip_atf_load_bl31(RK3562, rk3562_bl31_bin, rk3562_bl32_bin, fdt);
+}
+
+void __noreturn rk3562_barebox_entry(void *fdt)
+{
+	unsigned long membase, endmem;
+
+	membase = RK3562_DRAM_BOTTOM;
+	endmem = rk3562_ram0_size();
+
+	rk_scratch = (void *)arm_mem_scratch(endmem);
+
+	if (current_el() == 3) {
+		rk3562_lowlevel_init();
+		rockchip_store_bootrom_iram(IOMEM(RK3562_IRAM_BASE));
+
+		/*
+		 * The downstream TF-A doesn't cope with our device tree when
+		 * CONFIG_OF_OVERLAY_LIVE is enabled, supposedly because it is
+		 * too big for some reason. Otherwise it doesn't have any visible
+		 * effect if we pass a device tree or not, except that the TF-A
+		 * fills in the ethernet MAC address into the device tree.
+		 * The upstream TF-A doesn't use the device tree at all.
+		 *
+		 * Pass NULL for now until we have a good reason to pass a real
+		 * device tree.
+		 */
+		rk3562_atf_load_bl31(NULL);
+		/* not reached when CONFIG_ARCH_ROCKCHIP_ATF */
+	}
+
+	optee_set_membase(rk_scratch_get_optee_hdr());
+	barebox_arm_entry(membase, endmem - membase, fdt);
+}
+
 void rk3568_atf_load_bl31(void *fdt)
 {
 	rockchip_atf_load_bl31(RK3568, rk3568_bl31_bin, rk3568_bl32_bin, fdt);
@@ -192,14 +230,30 @@ static int rk3588_fixup_mem(void *fdt)
 	return fdt_fixup_mem(fdt, base, size, i);
 }
 
+static int rk3588_open_fdt(const void *fdt, void *buf, int bufsize)
+{
+	int root;
+
+	if (fdt_create_empty_tree(buf, bufsize) != 0)
+		return -1;
+	root = fdt_path_offset(buf, "/");
+
+	fdt_setprop_u32(buf, root, "#address-cells", 2);
+	fdt_setprop_u32(buf, root, "#size-cells", 2);
+
+	return 0;
+}
+
 void __noreturn rk3588_barebox_entry(void *fdt)
 {
-	unsigned long membase, endmem;
+	phys_addr_t membase, memend;
+	resource_size_t memsize;
 
-	membase = RK3588_DRAM_BOTTOM;
-	endmem = rk3588_ram0_size();
+	rk3588_ram_sizes(&membase, &memsize, 1);
 
-	rk_scratch = (void *)arm_mem_scratch(endmem);
+	memend = membase + memsize;
+
+	rk_scratch = (void *)arm_mem_scratch(memend);
 
 	if (current_el() == 3) {
 		void *fdt_scratch = NULL;
@@ -210,7 +264,7 @@ void __noreturn rk3588_barebox_entry(void *fdt)
 		if (IS_ENABLED(CONFIG_ARCH_ROCKCHIP_ATF_PASS_FDT)) {
 			pr_debug("Copy fdt to scratch area 0x%p (%zu bytes)\n",
 				 rk_scratch->fdt, sizeof(rk_scratch->fdt));
-			if (fdt_open_into(fdt, rk_scratch->fdt, sizeof(rk_scratch->fdt)) == 0)
+			if (rk3588_open_fdt(fdt, rk_scratch->fdt, sizeof(rk_scratch->fdt)) == 0)
 				fdt_scratch = rk_scratch->fdt;
 			else
 				pr_warn("Failed to copy fdt to scratch: Continue without fdt\n");
@@ -223,7 +277,7 @@ void __noreturn rk3588_barebox_entry(void *fdt)
 	}
 
 	optee_set_membase(rk_scratch_get_optee_hdr());
-	barebox_arm_entry(membase, endmem - membase, fdt);
+	barebox_arm_entry(membase, memsize, fdt);
 }
 
 void rk3576_atf_load_bl31(void *fdt)

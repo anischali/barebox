@@ -113,7 +113,7 @@ static struct efi_file_handle *file_open(struct file_handle *parent,
 
 	dirfd = parent->dir ? parent->fd : parent->parent->fd;
 
-	if (open_mode & (EFI_FILE_MODE_READ | EFI_FILE_MODE_WRITE))
+	if (open_mode & EFI_FILE_MODE_WRITE)
 		flags |= O_RDWR;
 	else
 		flags |= O_RDONLY;
@@ -284,6 +284,11 @@ static efi_status_t EFIAPI efi_file_delete(struct efi_file_handle *file)
 	EFI_ENTRY("%p", file);
 
 	file_close(fh);
+
+	if (!fh->parent) {
+		free(fh);
+		return EFI_EXIT(EFI_WARN_DELETE_FAILURE);
+	}
 
 	ret = unlinkat(fh->parent->fd, fh->path, flags);
 
@@ -968,17 +973,23 @@ struct efi_file_handle *efi_file_from_path(struct efi_device_path *fp)
 		 * protocol member functions to be aligned.  So memcpy it
 		 * unconditionally
 		 */
-		if (fdp->header.length <= offsetof(struct efi_device_path_file_path, path_name))
+		if (fdp->header.length <= offsetof(struct efi_device_path_file_path, path_name)) {
+			f->close(f);
 			return NULL;
+		}
 		filename_sz = fdp->header.length -
 			offsetof(struct efi_device_path_file_path, path_name);
 		filename = memdup(fdp->path_name, filename_sz);
-		if (!filename)
+		if (!filename) {
+			f->close(f);
 			return NULL;
+		}
 		efiret = f->open(f, &f2, filename, EFI_FILE_MODE_READ, 0);
 		free(filename);
-		if (efiret != EFI_SUCCESS)
+		if (efiret != EFI_SUCCESS) {
+			f->close(f);
 			return NULL;
+		}
 
 		fp = efi_dp_next(fp);
 

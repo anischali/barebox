@@ -31,6 +31,7 @@
 #ifdef CONFIG_ARCH_IMX
 #include <mach/imx/ocotp.h>
 #include <mach/imx/ocotp-fusemap.h>
+#include <mach/imx/generic.h>
 #else
 #include <mach/mxs/ocotp.h>
 #include <mach/mxs/ocotp-fusemap.h>
@@ -294,7 +295,7 @@ static void imx8m_lock_srk_revoke(struct ocotp_priv *priv)
 	writel(val, priv->base + OCOTP_SW_STICKY);
 }
 
-static bool imx8m_field_return_locked(struct ocotp_priv *priv)
+static bool imx_field_return_locked(struct ocotp_priv *priv)
 {
 	return readl(priv->base + OCOTP_SW_STICKY) & OCOTP_SW_STICKY_FIELD_RETURN_LOCK;
 }
@@ -853,17 +854,49 @@ static int imx_ocotp_init_dt(struct ocotp_priv *priv)
 	return imx8m_feat_ctrl_init(priv->dev.parent, tester3, tester4, priv->data->feat);
 }
 
+#ifndef CONFIG_ARCH_IMX
+static inline bool imx8mp_keep_compatible_soc_uid(void)
+{
+	return false;
+}
+#endif
+
+#define IMX8MP_OCOTP_UID(n)	\
+	(OCOTP_WORD(0x420 + 0x10 * (n)) | OCOTP_BIT(0) | OCOTP_WIDTH(32))
+#define IMX8MP_OCOTP_UID_2(n)	\
+	(OCOTP_WORD(0xe00 + 0x10 * (n)) | OCOTP_BIT(0) | OCOTP_WIDTH(32))
+
 static void imx_ocotp_set_unique_machine_id(void)
 {
-	uint32_t unique_id_parts[UNIQUE_ID_NUM];
-	int i;
+	bool is_imx8mp = of_machine_is_compatible("fsl,imx8mp");
+	uint32_t uid[4];
+	int len;
+	char *uidstr;
 
-	for (i = 0; i < UNIQUE_ID_NUM; i++)
-		if (imx_ocotp_read_field(OCOTP_UNIQUE_ID(i),
-					 &unique_id_parts[i]))
+	if (is_imx8mp && !imx8mp_keep_compatible_soc_uid()) {
+		if (imx_ocotp_read_field(IMX8MP_OCOTP_UID(0), &uid[0]))
+			return;
+		if (imx_ocotp_read_field(IMX8MP_OCOTP_UID(1), &uid[1]))
 			return;
 
-	machine_id_set_hashable(unique_id_parts, sizeof(unique_id_parts));
+		if (imx_ocotp_read_field(IMX8MP_OCOTP_UID_2(0), &uid[2]))
+			return;
+		if (imx_ocotp_read_field(IMX8MP_OCOTP_UID_2(1), &uid[3]))
+			return;
+		len = sizeof(uid);
+		uidstr = xasprintf("%08X%08X%08X%08X", uid[3], uid[2], uid[1], uid[0]);
+	} else {
+		if (imx_ocotp_read_field(OCOTP_UNIQUE_ID(0), &uid[0]))
+			return;
+		if (imx_ocotp_read_field(OCOTP_UNIQUE_ID(1), &uid[1]))
+			return;
+
+		len = sizeof(uid) / 2;
+		uidstr = xasprintf("%08X%08X", uid[1], uid[0]);
+	}
+
+	barebox_set_soc_uid(uidstr, &uid, len);
+	free(uidstr);
 }
 
 static int imx_ocotp_probe(struct device *dev)
@@ -939,8 +972,7 @@ static int imx_ocotp_probe(struct device *dev)
 				  ethaddr->value, ethaddr);
 	}
 
-	if (IS_ENABLED(CONFIG_MACHINE_ID))
-		imx_ocotp_set_unique_machine_id();
+	imx_ocotp_set_unique_machine_id();
 
 	ret = imx_ocotp_init_dt(priv);
 	if (ret)
@@ -990,6 +1022,7 @@ static struct imx_ocotp_data imx6q_ocotp_data = {
 	.fuse_blow = imx6_fuse_blow_addr,
 	.fuse_read = imx6_fuse_read_addr,
 	.ctrl = &ocotp_ctrl_reg_default,
+	.field_return_locked = imx_field_return_locked,
 };
 
 static struct imx_ocotp_data imx6sl_ocotp_data = {
@@ -1002,6 +1035,7 @@ static struct imx_ocotp_data imx6sl_ocotp_data = {
 	.fuse_blow = imx6_fuse_blow_addr,
 	.fuse_read = imx6_fuse_read_addr,
 	.ctrl = &ocotp_ctrl_reg_default,
+	.field_return_locked = imx_field_return_locked,
 };
 
 static struct imx_ocotp_data imx6ul_ocotp_data = {
@@ -1014,6 +1048,7 @@ static struct imx_ocotp_data imx6ul_ocotp_data = {
 	.fuse_blow = imx6_fuse_blow_addr,
 	.fuse_read = imx6_fuse_read_addr,
 	.ctrl = &ocotp_ctrl_reg_default,
+	.field_return_locked = imx_field_return_locked,
 };
 
 static struct imx_ocotp_data imx6ull_ocotp_data = {
@@ -1026,6 +1061,7 @@ static struct imx_ocotp_data imx6ull_ocotp_data = {
 	.fuse_blow = imx6_fuse_blow_addr,
 	.fuse_read = imx6_fuse_read_addr,
 	.ctrl = &ocotp_ctrl_reg_default,
+	.field_return_locked = imx_field_return_locked,
 };
 
 static struct imx_ocotp_data vf610_ocotp_data = {
@@ -1063,7 +1099,7 @@ static struct imx_ocotp_data imx8mp_ocotp_data = {
 	.fuse_read = imx6_fuse_read_addr,
 	.srk_revoke_locked = imx8m_srk_revoke_locked,
 	.lock_srk_revoke = imx8m_lock_srk_revoke,
-	.field_return_locked = imx8m_field_return_locked,
+	.field_return_locked = imx_field_return_locked,
 	.ctrl = &ocotp_ctrl_reg_8mp,
 };
 
@@ -1095,7 +1131,7 @@ static struct imx_ocotp_data imx8mm_ocotp_data = {
 	.fuse_read = imx6_fuse_read_addr,
 	.srk_revoke_locked = imx8m_srk_revoke_locked,
 	.lock_srk_revoke = imx8m_lock_srk_revoke,
-	.field_return_locked = imx8m_field_return_locked,
+	.field_return_locked = imx_field_return_locked,
 	.feat = &imx8mm_featctrl_data,
 	.ctrl = &ocotp_ctrl_reg_default,
 };
@@ -1116,7 +1152,7 @@ static struct imx_ocotp_data imx8mn_ocotp_data = {
 	.fuse_read = imx6_fuse_read_addr,
 	.srk_revoke_locked = imx8m_srk_revoke_locked,
 	.lock_srk_revoke = imx8m_lock_srk_revoke,
-	.field_return_locked = imx8m_field_return_locked,
+	.field_return_locked = imx_field_return_locked,
 	.feat = &imx8mn_featctrl_data,
 	.ctrl = &ocotp_ctrl_reg_default,
 };

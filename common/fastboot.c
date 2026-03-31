@@ -269,11 +269,13 @@ static char *fastboot_msg[] = {
 	[FASTBOOT_MSG_NONE] = "",
 };
 
+#define FASTBOOT_MAX_RESPONSE_SIZE 256
+
 int fastboot_tx_print(struct fastboot *fb, enum fastboot_msg_type type,
 		      const char *fmt, ...)
 {
 	struct va_format vaf;
-	char buf[64];
+	char buf[FASTBOOT_MAX_RESPONSE_SIZE + 1];
 	va_list ap;
 	int n;
 	const char *msg = fastboot_msg[type];
@@ -282,7 +284,7 @@ int fastboot_tx_print(struct fastboot *fb, enum fastboot_msg_type type,
 	vaf.fmt = fmt;
 	vaf.va = &ap;
 
-	n = snprintf(buf, 64, "%s%pV", msg, &vaf);
+	n = snprintf(buf, FASTBOOT_MAX_RESPONSE_SIZE + 1, "%s%pV", msg, &vaf);
 
 	switch (type) {
 	case FASTBOOT_MSG_OKAY:
@@ -302,8 +304,8 @@ int fastboot_tx_print(struct fastboot *fb, enum fastboot_msg_type type,
 
 	va_end(ap);
 
-	if (n > 64)
-		n = 64;
+	if (n > FASTBOOT_MAX_RESPONSE_SIZE)
+		n = FASTBOOT_MAX_RESPONSE_SIZE;
 
 	return fb->write(fb, buf, n);
 }
@@ -441,7 +443,7 @@ static void cb_download(struct fastboot *fb, const char *cmd)
 		close(fb->download_fd);
 	}
 
-	fb->download_fd = open(fb->tempname, O_WRONLY | O_CREAT | O_TRUNC);
+	fb->download_fd = open(fb->tempname, O_WRONLY | O_CREAT | O_TRUNC, 0666);
 	if (fb->download_fd < 0) {
 		fastboot_tx_print(fb, FASTBOOT_MSG_FAIL, "internal error");
 			return;
@@ -589,7 +591,7 @@ static int fastboot_handle_sparse(struct fastboot *fb,
 			return ret;
 	}
 
-	fd = open(fentry->filename, flags);
+	fd = open(fentry->filename, flags, 0666);
 	if (fd < 0)
 		return -errno;
 
@@ -943,7 +945,7 @@ static void cb_oem_exec(struct fastboot *fb, const char *cmd)
 		return;
 	}
 
-	ret = run_command(cmd);
+	ret = run_command("%s", cmd);
 	if (ret < 0)
 		fastboot_tx_print(fb, FASTBOOT_MSG_FAIL, "%pe", ERR_PTR(ret));
 	else if (ret > 0)

@@ -21,9 +21,9 @@
 	};
 
 	configurations {
-		default = "conf_9";
+		default = "conf_1";
 
-		conf_9 {
+		conf_1 {
 			description = "barebox standalone";
 			loadables = "barebox";
 			hash-1 {

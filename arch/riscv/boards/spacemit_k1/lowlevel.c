@@ -13,8 +13,6 @@ ENTRY_FUNCTION(start_spacemit_k1, a0, a1, a2)
 	debug_ll_init();
 
 	putc_ll('>');
-	/* On POR, we are running from read-only memory here. */
-
     
     if (a1 != 0xffffffff) {
         fdt = (void *)a1;
@@ -24,20 +22,3 @@ ENTRY_FUNCTION(start_spacemit_k1, a0, a1, a2)
 
 	barebox_riscv_supervisor_entry(0xC0000000, SZ_256M, a0, fdt);
 }
-
-
-/* Need the its for barebox 
-
-		barebox {
-            description = "Barebox";
-            data = /incbin/("/home/anicha1/sources/barebox/images/barebox-spacemit-k1.img");
-            type = "standalone";
-            arch = "riscv";
-            os = "barebox";
-            compression = "none";
-            load = <0x0 0x00200000>;    
-            hash-1 {
-                algo = "crc32";
-            };
-        };
-*/

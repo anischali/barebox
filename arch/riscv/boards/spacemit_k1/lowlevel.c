@@ -11,8 +11,6 @@ ENTRY_FUNCTION(start_spacemit_k1, a0, a1, a2)
 	void *fdt;
 
 	debug_ll_init();
-
-	putc_ll('>');
     
     if (a1 != 0xffffffff) {
         fdt = (void *)a1;
@@ -20,5 +18,5 @@ ENTRY_FUNCTION(start_spacemit_k1, a0, a1, a2)
         fdt = __dtb_z_spacemit_k1_start + get_runtime_offset();
     }
 
-	barebox_riscv_supervisor_entry(0xC0000000, SZ_256M, a0, fdt);
+	barebox_riscv_supervisor_entry(0x80000000, SZ_128M, a0, fdt);
 }

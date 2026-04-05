@@ -38,7 +38,9 @@ void __noreturn barebox_pbl_start(unsigned long membase, unsigned long memsize,
 	struct elf_image elf;
 	int ret;
 
+	putc_ll('>');
 	irq_init_vector(riscv_mode());
+	putc_ll('<');
 
 	/* piggy data is not relocated, so determine the bounds now */
 	pg_start = runtime_address(input_data);
@@ -51,10 +53,15 @@ void __noreturn barebox_pbl_start(unsigned long membase, unsigned long memsize,
 	 * to the current address. Otherwise it may be a readonly location.
 	 * Copy and relocate to the start of the memory in this case.
 	 */
-	if (pc > membase && pc - membase < memsize)
+	putc_ll('>');
+	if (pc > membase && pc - membase < memsize) {
+		putc_ll('1');
 		relocate_to_current_adr();
-	else
+	}
+	else {
+		putc_ll('2');
 		relocate_to_adr(membase);
+	}
 
 	barebox_base = riscv_mem_barebox_image(membase, endmem,
 					       uncompressed_len + MAX_BSS_SIZE);

@@ -20,7 +20,8 @@ config SOC_SPACEMIT_K1
 	depends on ARCH_RV64I
 	select HAS_DEBUG_LL
 	select DEBUG_SPACEMIT_K1
-	select RISCV_M_MODE
+	select RISCV_S_MODE
+	select RISCV_ICACHE
 	select RISCV_TIMER
 
 config BOARD_SPACEMIT_K1

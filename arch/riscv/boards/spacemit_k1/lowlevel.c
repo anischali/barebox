@@ -12,11 +12,15 @@ ENTRY_FUNCTION(start_spacemit_k1, a0, a1, a2)
 
 	debug_ll_init();
     
-    if (a1 != 0xffffffff) {
+    if (a1 && fdt_check_header((void *)a1) == 0) {
         fdt = (void *)a1;
     } else {
         fdt = __dtb_z_spacemit_k1_start + get_runtime_offset();
     }
 
-	barebox_riscv_supervisor_entry(0x80000000, SZ_128M, a0, fdt);
+
+    puthex_ll((unsigned long)fdt);
+    putc_ll('\n');
+
+	barebox_riscv_supervisor_entry(0xC0020000, SZ_1G, a0, fdt);
 }

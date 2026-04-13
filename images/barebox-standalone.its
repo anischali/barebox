@@ -12,7 +12,7 @@
 			os = "barebox";
 			arch = "riscv";
 			compression = "none";
-			load = <0x0 0x20000>;
+			load = <0x0 0x100000>;
 			data = /incbin/("./barebox-spacemit-k1.img");
 			hash-1 {
 				algo = "crc32";

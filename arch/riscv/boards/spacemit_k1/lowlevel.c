@@ -22,5 +22,5 @@ ENTRY_FUNCTION(start_spacemit_k1, a0, a1, a2)
     puthex_ll((unsigned long)fdt);
     putc_ll('\n');
 
-	barebox_riscv_supervisor_entry(0xC0020000, SZ_1G, a0, fdt);
+	barebox_riscv_supervisor_entry(0xC0100000, SZ_512M, a0, fdt);
 }

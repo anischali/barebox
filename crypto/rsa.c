@@ -403,6 +403,10 @@ struct public_key *rsa_of_read_key(struct device_node *node)
 	of_property_read_u32(node, "rsa,num-bits", &rsa->len);
 	of_property_read_u32(node, "rsa,n0-inverse", &rsa->n0inv);
 
+	// add validity window to support TSA RFC 3161 TimeStampToken
+	of_property_read_u64(node, "rsa,not-before", &rsa->not_before);
+	of_property_read_u64(node, "rsa,not-after", &rsa->not_after);
+
 	public_exponent = of_get_property(node, "rsa,exponent", &length);
 	if (!public_exponent || length < sizeof(*public_exponent))
 		rsa->exponent = RSA_DEFAULT_PUBEXP;

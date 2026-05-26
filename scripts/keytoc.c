@@ -598,11 +598,23 @@ static char *try_resolve_env(char *input)
 	return var;
 }
 
+static time_t asn1_time_to_ktime_t(const ASN1_TIME *t)
+{
+    struct tm tm = {0};
+
+    if (ASN1_TIME_to_tm(t, &tm) != 1) {
+        return (time_t)-1;
+    }
+
+    return timegm(&tm); // UTC
+}
+
 static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
 {
 	BIGNUM *modulus, *r_squared;
 	uint64_t exponent = 0;
 	uint32_t n0_inv;
+	time_t before = -1, after = -1;
 	int bits;
 	int ret;
 
@@ -663,10 +675,15 @@ static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
 			fprintf(outfilep, "static struct rsa_public_key %s = {\n", info->name_c);
 		}
 
+		before = asn1_time_to_ktime_t(X509_get0_notBefore((X509 *)key));
+		after = asn1_time_to_ktime_t(X509_get0_notAfter((X509 *)key));
+
 		fprintf(outfilep, "\t.len = %d,\n", bits / 32);
 		fprintf(outfilep, "\t.n0inv = 0x%0x,\n", n0_inv);
 		fprintf(outfilep, "\t.modulus = %s_modulus,\n", info->name_c);
 		fprintf(outfilep, "\t.rr = %s_rr,\n", info->name_c);
+		fprintf(outfilep, "\t.not_before = %lld,\n", (long long)before);
+		fprintf(outfilep, "\t.not_after = %lld,\n", (long long)after);
 		fprintf(outfilep, "\t.exponent = 0x%0lx,\n", exponent);
 		fprintf(outfilep, "};\n");
 

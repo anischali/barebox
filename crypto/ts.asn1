@@ -1,0 +1,39 @@
+--- RFC 3161 TSTInfo ASN.1 definition
+---
+--- Copyright (C) 2024. All Rights Reserved.
+---
+--- Reference: RFC 3161 - Internet X.509 PKI Time-Stamp Protocol
+---
+--- This file is to be used with the Linux kernel ASN.1 compiler
+--- (scripts/asn1_compiler) and follows the same conventions as
+--- x509.asn1, pkcs7.asn1 found in crypto/ and certs/
+---
+
+TSTInfo ::= SEQUENCE {
+	version			INTEGER ({ tsa_note_version }),
+	policy			OBJECT IDENTIFIER ({ tsa_note_policy }),
+	messageImprint		MessageImprint ({ tsa_note_message_imprint }),
+	serialNumber		INTEGER ({ tsa_note_serial }),
+	genTime			GeneralizedTime ({ tsa_note_gen_time }),
+	accuracy		Accuracy OPTIONAL,
+	ordering		BOOLEAN DEFAULT ({ tsa_ordering }),
+	nonce			INTEGER OPTIONAL ({ tsa_note_nonce }),
+	tsa		    	[0] EXPLICIT ANY OPTIONAL,
+	extensions		[1] IMPLICIT ANY OPTIONAL
+}
+
+MessageImprint ::= SEQUENCE {
+	hashAlgorithm		AlgorithmIdentifier,
+	hashedMessage		OCTET STRING ({ tsa_note_hashed_message })
+}
+
+AlgorithmIdentifier ::= SEQUENCE {
+	algorithm		OBJECT IDENTIFIER ({ tsa_note_hash_algo }),
+	parameters		ANY OPTIONAL
+}
+
+Accuracy ::= SEQUENCE {
+	seconds			INTEGER OPTIONAL ({ tsa_note_accuracy_seconds }),
+	millis			[0] IMPLICIT INTEGER OPTIONAL ({ tsa_note_accuracy_millis }),
+	micros			[1] IMPLICIT INTEGER OPTIONAL ({ tsa_note_accuracy_micros })
+}

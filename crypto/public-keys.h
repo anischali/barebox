@@ -49,7 +49,7 @@ static struct rsa_public_key key_1 = {
 	.modulus = key_1_modulus,
 	.rr = key_1_rr,
 	.not_before = -1,
-	.not_after = 1780205824,
+	.not_after = 1780208757,
 	.exponent = 0x10001,
 };
 

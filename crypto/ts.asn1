@@ -10,16 +10,16 @@
 ---
 
 TSTInfo ::= SEQUENCE {
-	version			INTEGER ({ tsa_note_version }),
-	policy			OBJECT IDENTIFIER ({ tsa_note_policy }),
+	version			    INTEGER ({ tsa_note_version }),
+	policy			    OBJECT IDENTIFIER ({ tsa_note_policy }),
 	messageImprint		MessageImprint ({ tsa_note_message_imprint }),
 	serialNumber		INTEGER ({ tsa_note_serial }),
-	genTime			GeneralizedTime ({ tsa_note_gen_time }),
-	accuracy		Accuracy OPTIONAL,
-	ordering		BOOLEAN DEFAULT ({ tsa_ordering }),
-	nonce			INTEGER OPTIONAL ({ tsa_note_nonce }),
-	tsa		    	[0] EXPLICIT ANY OPTIONAL,
-	extensions		[1] IMPLICIT ANY OPTIONAL
+	genTime			    GeneralizedTime ({ tsa_note_gen_time }),
+	accuracy		    Accuracy OPTIONAL,
+	ordering		    BOOLEAN DEFAULT ({ tsa_ordering }),
+	nonce			    INTEGER OPTIONAL ({ tsa_note_nonce }),
+	tsa		    	    [0] EXPLICIT ANY OPTIONAL,
+	extensions		    [1] IMPLICIT ANY OPTIONAL
 }
 
 MessageImprint ::= SEQUENCE {
@@ -28,12 +28,12 @@ MessageImprint ::= SEQUENCE {
 }
 
 AlgorithmIdentifier ::= SEQUENCE {
-	algorithm		OBJECT IDENTIFIER ({ tsa_note_hash_algo }),
-	parameters		ANY OPTIONAL
+	algorithm		    OBJECT IDENTIFIER ({ tsa_note_hash_algo }),
+	parameters		    ANY OPTIONAL
 }
 
 Accuracy ::= SEQUENCE {
-	seconds			INTEGER OPTIONAL ({ tsa_note_accuracy_seconds }),
-	millis			[0] IMPLICIT INTEGER OPTIONAL ({ tsa_note_accuracy_millis }),
-	micros			[1] IMPLICIT INTEGER OPTIONAL ({ tsa_note_accuracy_micros })
+	seconds			    INTEGER OPTIONAL ({ tsa_note_accuracy_seconds }),
+	millis			    [0] IMPLICIT INTEGER OPTIONAL ({ tsa_note_accuracy_millis }),
+	micros			    [1] IMPLICIT INTEGER OPTIONAL ({ tsa_note_accuracy_micros })
 }

@@ -83,19 +83,25 @@ int ts_info_verify(const struct ts_info_t *info,
 
 /**
  * ts_verify_cms_signature - verify the CMS signature over the timestamp token
- * @signer:   parsed SignerInfo (from ts_parse_response with non-NULL signer)
- * @key_name: name of the trusted TSA public key in the barebox keyring
- * @keyring:  keyring to search (e.g. "tsa")
+ * @info:    parsed TSTInfo (from ts_parse_response)
+ * @signer:  parsed SignerInfo (from ts_parse_response with non-NULL signer)
+ * @keyring: keyring to search (e.g. "tsa")
  *
- * Performs the full RFC 5652 signature verification:
- *   1. Verifies signedAttrs.messageDigest == hash(TSTInfo bytes)
- *   2. Verifies RSA/ECDSA signature over hash(SET(signedAttrs))
+ * The key is looked up by converting info->policy (the TSA policy OID) to
+ * its dotted-decimal string form (e.g. "1.3.6.1.4.1.4146.2.2") and calling
+ * public_key_get() with that string.  Register TSA public keys in the
+ * barebox keyring under the policy OID as the key name.
+ *
+ * Performs full RFC 5652 signature verification:
+ *   1. signedAttrs.messageDigest == hash(raw TSTInfo bytes)
+ *   2. RSA/ECDSA signature over hash(SET(signedAttrs))
  *
  * Returns 0 on success, -EKEYREJECTED on bad signature, -ENOKEY if the
  * key is not found, -EBADMSG on structural errors.
  */
-int ts_verify_cms_signature(const struct ts_signer_info_t *signer,
-			    const char *key_name, const char *keyring);
+int ts_verify_cms_signature(const struct ts_info_t *info,
+			    const struct ts_signer_info_t *signer,
+			    const char *keyring);
 
 /**
  * ts_info_get_time - return the TSTInfo generation time as Unix seconds

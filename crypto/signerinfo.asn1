@@ -1,0 +1,24 @@
+--- CMS SignerInfo ASN.1 definition for RFC 3161 timestamp token verification
+---
+--- Decodes the first SignerInfo SEQUENCE from the signerInfos SET OF SignerInfo.
+--- The root type is SignerInfo (SEQUENCE), not the SET wrapper.
+---
+--- signedAttrs [0] IMPLICIT carries the attributes to be hashed for signature
+--- verification; the caller must substitute the SET tag (0x31) for 0xA0 before
+--- hashing, as required by RFC 5652 §5.4.
+
+SignerInfo ::= SEQUENCE {
+	version             INTEGER,
+	sid                 ANY,
+	digestAlgorithm     SEQUENCE {
+		algorithm    OBJECT IDENTIFIER ({ tsa_signer_digest_algo }),
+		parameters   ANY OPTIONAL
+	},
+	signedAttrs         [0] IMPLICIT ANY OPTIONAL ({ tsa_signer_signed_attrs }),
+	signatureAlgorithm  SEQUENCE {
+		algorithm    OBJECT IDENTIFIER ({ tsa_signer_sig_algo }),
+		parameters   ANY OPTIONAL
+	},
+	signature           OCTET STRING ({ tsa_signer_signature }),
+	unsignedAttrs       [1] IMPLICIT ANY OPTIONAL
+}

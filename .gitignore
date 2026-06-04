@@ -46,6 +46,8 @@ policy-list
 *.dtb.*
 *.dtbo
 *.dtbo.*
+*.asn1.c
+*.asn1.h
 
 #
 # Top-level generic files

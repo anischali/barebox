@@ -153,6 +153,7 @@ static const char * const bootm_verify_names[] = {
 	[BOOTM_VERIFY_NONE] = "none",
 	[BOOTM_VERIFY_HASH] = "hash",
 	[BOOTM_VERIFY_AVAILABLE] = "available",
+	[BOOTM_VERIFY_TSP_TOKEN] = "tsp_token",
 #endif
 	[BOOTM_VERIFY_SIGNATURE] = "signature",
 };

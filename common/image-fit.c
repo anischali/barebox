@@ -248,6 +248,23 @@ static struct digest *fit_alloc_digest(struct device_node *sig_node,
 	return digest;
 }
 
+
+static int fit_check_tsp_token(struct fit_handle *handle, struct device_node *sig_node,
+			       enum hash_algo algo, const char *sig_value, int sig_len)
+{	
+	const char *tsp_value;
+	int tsp_len;
+	
+	tsp_value = of_get_property(sig_node, "tsa-token", &tsp_len);
+	if (!tsp_value) {
+		pr_err("TSP token not found in %pOF\n", sig_node);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+
 static int fit_check_signature(struct fit_handle *handle, struct device_node *sig_node,
 			       enum hash_algo algo, void *hash)
 {
@@ -301,6 +318,11 @@ static int fit_check_signature(struct fit_handle *handle, struct device_node *si
 
 	return -EBADMSG;
 ok:
+#ifdef CONFIG_BOOTM_FORCE_SIGNED_IMAGES_WITH_TSP
+		pr_info("image signature OK, but not fully verified due to TSP token\n");
+		return fit_check_tsp_token(handle, sig_node, algo, sig_value, sig_len);
+#endif
+
 	return 0;
 }
 
@@ -798,6 +820,7 @@ int fit_config_verify_signature(struct fit_handle *handle, struct device_node *c
 	case BOOTM_VERIFY_HASH:
 		return 0;
 	case BOOTM_VERIFY_SIGNATURE:
+	case BOOTM_VERIFY_TSP_TOKEN:
 		ret = -EINVAL;
 		break;
 	case BOOTM_VERIFY_AVAILABLE:

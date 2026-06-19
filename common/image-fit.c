@@ -261,7 +261,7 @@ static int fit_check_tsp_token(struct fit_handle *handle, const struct public_ke
 	char policy_oid_str[64];
 	uint64_t gen_time;
 	
-	tsp_value = of_get_property(sig_node, "tsa-token", &tsp_len);
+	tsp_value = of_get_property(sig_node, "tsa-stamp", &tsp_len);
 	if (!tsp_value) {
 		pr_err("TSP token not found in %pOF\n", sig_node);
 		return -EINVAL;

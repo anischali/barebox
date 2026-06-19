@@ -408,6 +408,17 @@ static int print_bignum(BIGNUM *num, int num_bits, int width)
 	return 0;
 }
 
+static time_t asn1_time_to_ktime_t(const ASN1_TIME *t)
+{
+    struct tm tm = {0};
+
+    if (ASN1_TIME_to_tm(t, &tm) != 1) {
+        return (time_t)-1;
+    }
+
+    return timegm(&tm); // UTC
+}
+
 /*
  * When imported from a HSM the key doesn't have the EC point parameters,
  * only the pubkey itself exists. Exporting the pubkey and creating a new
@@ -511,6 +522,7 @@ static int gen_key_ecdsa(EVP_PKEY *key, struct keyinfo *info)
 	size_t outlen;
 	int ret, bits;
 	BIGNUM *key_x = NULL, *key_y = NULL;
+	time_t before = -1, after = -1;
 
 	key = reimport_key(key);
 	if (!key)
@@ -530,6 +542,9 @@ static int gen_key_ecdsa(EVP_PKEY *key, struct keyinfo *info)
 	ret = EVP_PKEY_get_bn_param(key, OSSL_PKEY_PARAM_EC_PUB_Y, &key_y);
 	if (!ret)
 		return -EINVAL;
+
+	before = asn1_time_to_ktime_t(X509_get0_notBefore((X509 *)key));
+	after = asn1_time_to_ktime_t(X509_get0_notAfter((X509 *)key));
 
 	if (dts) {
 		fprintf(stderr, "ERROR: generating a dts snippet for ECDSA keys is not yet supported\n");
@@ -570,6 +585,8 @@ static int gen_key_ecdsa(EVP_PKEY *key, struct keyinfo *info)
 			fprintf(outfilep, "\t.keyring = \"%s\",\n", info->keyring);
 			fprintf(outfilep, "\t.hash = %s_hash,\n", info->name_c);
 			fprintf(outfilep, "\t.hashlen = %u,\n", SHA256_DIGEST_LENGTH);
+			fprintf(outfilep, "\t.not_before = %lld,\n", (long long)before);
+			fprintf(outfilep, "\t.not_after = %lld,\n", (long long)after);
 			fprintf(outfilep, "\t.ecdsa = &%s,\n", info->name_c);
 			fprintf(outfilep, "};\n");
 			fprintf(outfilep, "\n");
@@ -596,17 +613,6 @@ static char *try_resolve_env(char *input)
 	}
 
 	return var;
-}
-
-static time_t asn1_time_to_ktime_t(const ASN1_TIME *t)
-{
-    struct tm tm = {0};
-
-    if (ASN1_TIME_to_tm(t, &tm) != 1) {
-        return (time_t)-1;
-    }
-
-    return timegm(&tm); // UTC
 }
 
 static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
@@ -682,8 +688,6 @@ static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
 		fprintf(outfilep, "\t.n0inv = 0x%0x,\n", n0_inv);
 		fprintf(outfilep, "\t.modulus = %s_modulus,\n", info->name_c);
 		fprintf(outfilep, "\t.rr = %s_rr,\n", info->name_c);
-		fprintf(outfilep, "\t.not_before = %lld,\n", (long long)before);
-		fprintf(outfilep, "\t.not_after = %lld,\n", (long long)after);
 		fprintf(outfilep, "\t.exponent = 0x%0lx,\n", exponent);
 		fprintf(outfilep, "};\n");
 
@@ -694,6 +698,8 @@ static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
 			fprintf(outfilep, "\t.keyring = \"%s\",\n", info->keyring);
 			fprintf(outfilep, "\t.hash = %s_hash,\n", info->name_c);
 			fprintf(outfilep, "\t.hashlen = %u,\n", SHA256_DIGEST_LENGTH);
+			fprintf(outfilep, "\t.not_before = %lld,\n", (long long)before);
+			fprintf(outfilep, "\t.not_after = %lld,\n", (long long)after);
 			fprintf(outfilep, "\t.rsa = &%s,\n", info->name_c);
 			fprintf(outfilep, "};\n");
 			fprintf(outfilep, "\n");

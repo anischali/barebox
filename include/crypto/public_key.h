@@ -31,6 +31,8 @@ struct public_key {
 	char *keyring;
 	const unsigned char *hash;
 	unsigned int hashlen;
+	ktime_t not_before;	/* Optional validity window start time (UNIX timestamp) */
+	ktime_t not_after;	/* Optional validity window end time (UNIX timestamp) */
 
 	union {
 		const struct rsa_public_key *rsa;

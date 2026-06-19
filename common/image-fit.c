@@ -17,11 +17,13 @@
 #include <malloc.h>
 #include <linux/ctype.h>
 #include <linux/refcount.h>
+#include <linux/oid_registry.h>
 #include <asm/byteorder.h>
 #include <errno.h>
 #include <linux/err.h>
 #include <stringlist.h>
 #include <crypto/public_key.h>
+#include <crypto/ts.h>
 #include <uncompress.h>
 #include <image-fit.h>
 #include <fuzz.h>
@@ -249,17 +251,57 @@ static struct digest *fit_alloc_digest(struct device_node *sig_node,
 }
 
 
-static int fit_check_tsp_token(struct fit_handle *handle, struct device_node *sig_node,
+static int fit_check_tsp_token(struct fit_handle *handle, const struct public_key *key, struct device_node *sig_node,
 			       enum hash_algo algo, const char *sig_value, int sig_len)
 {	
 	const char *tsp_value;
-	int tsp_len;
+	int tsp_len, ret, status;
+	struct ts_info_t info;
+	struct ts_signer_info_t signer;
+	char policy_oid_str[64];
+	uint64_t gen_time;
 	
 	tsp_value = of_get_property(sig_node, "tsa-token", &tsp_len);
 	if (!tsp_value) {
 		pr_err("TSP token not found in %pOF\n", sig_node);
 		return -EINVAL;
 	}
+
+	ret = ts_parse_response(tsp_value, tsp_len,
+		      &status, &info, &signer);
+	if (ret) {
+		pr_err("Failed to parse TSP token: %d\n", ret);
+		return -EINVAL;
+	}
+
+	ret = ts_info_verify(&info, sig_value, sig_len);
+	if (ret) {
+		pr_err("TSP token message imprint verification failed: %d\n", ret);
+		return -EBADMSG;
+	}
+
+	ret = ts_verify_cms_signature(&info, &signer, "fit");
+	if (ret) {
+		pr_err("TSP token signature verification failed: %d\n", ret);
+		return -EBADMSG;
+	}
+
+	gen_time = ts_info_get_time(&info);
+	if (gen_time - key->not_after > 0) {
+		pr_err("The key that signed the image was expired at the time of signing (gen_time %llu > not_after %lld)\n",
+		       (unsigned long long)gen_time, (long long)key->not_after);
+		return -EINVAL;
+	}
+
+
+	ret = sprint_oid(info.policy.data, info.policy.len,
+			 policy_oid_str, sizeof(policy_oid_str));
+	if (ret < 0)
+		return -ENOKEY;
+
+	pr_info("TSP token info status: %d, policy OID: %s\n",
+		status, policy_oid_str);
+
 
 	return 0;
 }
@@ -320,7 +362,7 @@ static int fit_check_signature(struct fit_handle *handle, struct device_node *si
 ok:
 #ifdef CONFIG_BOOTM_FORCE_SIGNED_IMAGES_WITH_TSP
 		pr_info("image signature OK, but not fully verified due to TSP token\n");
-		return fit_check_tsp_token(handle, sig_node, algo, sig_value, sig_len);
+		return fit_check_tsp_token(handle, key, sig_node, algo, sig_value, sig_len);
 #endif
 
 	return 0;

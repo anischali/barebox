@@ -28,8 +28,6 @@ struct rsa_public_key {
 	uint32_t n0inv;		/* -1 / modulus[0] mod 2^32 */
 	const uint32_t *modulus;/* modulus as little endian array */
 	const uint32_t *rr;	/* R^2 as little endian array */
-	ktime_t not_before;	/* Optional validity window start time (UNIX timestamp) */
-	ktime_t not_after;	/* Optional validity window end time (UNIX timestamp) */
 	uint64_t exponent;	/* public exponent */
 };
 

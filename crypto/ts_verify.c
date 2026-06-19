@@ -236,7 +236,7 @@ int ts_verify_cms_signature(const struct ts_info_t *info,
 	if (ret < 0)
 		return -ENOKEY;
 
-	key = public_key_get("tsp", keyring);
+	key = public_key_get(policy_oid_str, keyring);
 	if (!key)
 		return -ENOKEY;
 

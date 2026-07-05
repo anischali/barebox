@@ -208,7 +208,7 @@ int ts_info_verify(const struct ts_info_t *info,
  *      SET tag substitution required by RFC 5652 §5.4.
  *   3. Look up the TSA key by converting info->policy OID to its
  *      dotted-decimal string (e.g. "1.3.6.1.4.1.4146.2.2") and calling
- *      public_key_get().  Register TSA keys under the policy OID string.
+ *      keyring_find_key().  Register TSA keys under the policy OID string.
  */
 int ts_verify_cms_signature(const struct ts_info_t *info,
 			    const struct ts_signer_info_t *signer,
@@ -236,7 +236,7 @@ int ts_verify_cms_signature(const struct ts_info_t *info,
 	if (ret < 0)
 		return -ENOKEY;
 
-	key = public_key_get(policy_oid_str, keyring);
+	key = keyring_find_key(keyring_find(keyring), policy_oid_str);
 	if (!key)
 		return -ENOKEY;
 

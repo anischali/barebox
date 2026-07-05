@@ -77,11 +77,6 @@ config FITIMAGE_SIGNATURE
 	bool
 	select CRYPTO_BUILTIN_KEYS
 
-config FITIMAGE_TSP_TOKEN
-	bool
-	select FITIMAGE_SIGNATURE
-	select CONFIG_CRYPTO_TS
-
 config LOGBUF
 	bool
 
@@ -756,9 +751,9 @@ config BOOTM_FORCE_SIGNED_IMAGES
 
 config BOOTM_FORCE_SIGNED_IMAGES_WITH_TSP
 	bool
-	prompt "Force booting of signed images"
+	prompt "Force booting of signed and TSP stamped images"
 	depends on BOOTM_FITIMAGE_SIGNATURE
-	select FITIMAGE_TSP_TOKEN
+	select CRYPTO_TS
 	help
 	  With this option enabled only signed images with a valid TSP token can be booted, this permits
 	  also in case of revoked keys to boot images that are signed prior to keyes revocation, and refuse

@@ -89,7 +89,7 @@ int ts_info_verify(const struct ts_info_t *info,
  *
  * The key is looked up by converting info->policy (the TSA policy OID) to
  * its dotted-decimal string form (e.g. "1.3.6.1.4.1.4146.2.2") and calling
- * public_key_get() with that string.  Register TSA public keys in the
+ * keyring_find_key() with that string.  Register TSA public keys in the
  * barebox keyring under the policy OID as the key name.
  *
  * Performs full RFC 5652 signature verification:

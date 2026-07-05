@@ -116,6 +116,13 @@ static void sdhci_reset_for_reason(struct sdhci *host, enum sdhci_reset_reason r
 
 #define sdhci_reset_for(h, r) sdhci_reset_for_reason((h), SDHCI_RESET_FOR_##r)
 
+static inline bool sdhci_card_ready(struct sdhci *sdhci)
+{
+	struct mci_host *host = sdhci->mci;
+
+	return host && host->mci->ready_for_use;
+}
+
 int sdhci_send_command(struct sdhci *host, struct mci_cmd *cmd)
 {
 	u32 mask, command, xfer;
@@ -138,7 +145,7 @@ int sdhci_send_command(struct sdhci *host, struct mci_cmd *cmd)
 				dma == SDHCI_NO_DMA ? false : true,
 				&command, &xfer);
 
-	sdhci_write8(host, SDHCI_TIMEOUT_CONTROL, 0xf);
+	sdhci_write8(host, SDHCI_TIMEOUT_CONTROL, 0xe);
 	if (xfer)
 		sdhci_write16(host, SDHCI_TRANSFER_MODE, xfer);
 	if (cmd->data) {
@@ -157,7 +164,12 @@ int sdhci_send_command(struct sdhci *host, struct mci_cmd *cmd)
 	ret = sdhci_wait_for_done(host, mask);
 	if (ret) {
 		sdhci_teardown_data(host, cmd->data, dma);
-		sdhci_dumpregs(host);
+#ifndef DEBUG
+		if (sdhci_card_ready(host) || ret != -ETIMEDOUT)
+#endif
+		{
+			sdhci_dumpregs(host);
+		}
 		goto error;
 	}
 

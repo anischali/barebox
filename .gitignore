@@ -46,6 +46,7 @@ policy-list
 *.dtb.*
 *.dtbo
 *.dtbo.*
+*.z
 *.asn1.c
 *.asn1.h
 

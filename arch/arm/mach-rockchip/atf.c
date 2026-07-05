@@ -173,7 +173,7 @@ static void rockchip_atf_load_bl31(void *fdt)
 	unsigned long bl31_ep;
 
 	mmu_early_enable(membase[0], memsize[0]);
-	pbl_malloc_init(membase[0] + memsize[0] - PBL_MALLOC_SIZE, PBL_MALLOC_SIZE);
+	pbl_malloc_init(barebox_malloc_base(membase[0], memsize[0]), PBL_MALLOC_SIZE);
 
 	bl31_ep = load_elf64_image_phdr(&bl31);
 
@@ -271,6 +271,8 @@ void __noreturn rk3588_barebox_entry(void *fdt)
 	rk_scratch = (void *)arm_mem_scratch(memend);
 
 	if (current_el() == 3) {
+		void *fdt_bl31 = NULL;
+
 		rk3588_lowlevel_init();
 		rockchip_store_bootrom_iram(IOMEM(RK3588_IRAM_BASE));
 		ROCKCHIP_GET_ADDRESSES(RK3588, rk3588_bl31_bin, rk3588_bl32_bin);
@@ -281,9 +283,11 @@ void __noreturn rk3588_barebox_entry(void *fdt)
 			ret = rockchip_create_optee_fdt(rk_scratch->fdt, sizeof(rk_scratch->fdt));
 			if (ret)
 				pr_warn("Failed to create OP-TEE Device tree\n");
+			else
+				fdt_bl31 = rk_scratch->fdt;
 		}
 
-		rockchip_atf_load_bl31(rk_scratch->fdt);
+		rockchip_atf_load_bl31(fdt_bl31);
 		/* not reached when CONFIG_ARCH_ROCKCHIP_ATF */
 	}
 

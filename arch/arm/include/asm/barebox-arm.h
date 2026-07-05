@@ -95,10 +95,12 @@ void *barebox_arm_boot_dtb(void);
  *                       + BSS) rounded to SZ_1M
  *                                   ↓
  *  ---------------------- arm_mem_barebox_image() ---------------------
- *                                   ↑
- *                                SZ_128K
- *                                   ↓
- *  ------------------------ arm_mem_early_malloc ----------------------
+ *     ARM32      ↑                  |                ↕         ARM64
+ *         PBL_MALLOC_SIZE           |------- pbl_malloc area end ------
+ *                ↓                  |                ↑
+ *  --- arm_mem_early_malloc --------|         PBL_MALLOC_SIZE
+ *                                   |                ↓
+ *                                   ----- pbl_malloc area start -------
  */
 void print_pbl_mem_layout(ulong membase, ulong endmem, ulong barebox_base);
 
@@ -193,7 +195,8 @@ static inline unsigned long arm_mem_barebox_image(unsigned long membase,
 						  const struct handoff_data *handoff_data)
 {
 #ifdef __PBL__
-	unsigned long size = uncompressed_len + MAX_BSS_SIZE + __handoff_data_size(handoff_data);
+	unsigned long size = ALIGN(uncompressed_len, 8) +
+		MAX_BSS_SIZE + __handoff_data_size(handoff_data);
 
 	endmem = arm_mem_ramoops(endmem);
 

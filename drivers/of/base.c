@@ -2127,7 +2127,9 @@ int of_set_root_node(struct device_node *node)
 
 	of_chosen = of_find_node_by_path("/chosen");
 	of_property_read_string(root_node, "model", &of_model);
-	of_property_write_bool(root_node, "$barebox,root-node", true);
+
+	if (root_node)
+		of_property_write_bool(root_node, "$barebox,root-node", true);
 
 	if (of_model)
 		barebox_set_model(of_model);
@@ -3411,7 +3413,14 @@ char *of_get_reproducible_name(struct device_node *node)
 
 	if (node->parent && of_get_property(node->parent, "ranges", NULL)) {
 		addr = of_translate_address(node, reg);
-		return basprintf("[0x%llx]", addr);
+		if (addr != OF_BAD_ADDR)
+			return basprintf("[0x%llx]", addr);
+		/*
+		 * Untranslatable - e.g. a PCI config-space address whose
+		 * tag (space=0) doesn't appear in the parent's ranges.
+		 * Fall through to the parent-prefixed encoding so distinct
+		 * untranslatable nodes don't all collide on OF_BAD_ADDR.
+		 */
 	}
 
 	na = of_n_addr_cells(node);

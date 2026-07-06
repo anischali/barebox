@@ -152,9 +152,9 @@ static int check_message_digest(const struct asn1_buf_t *sa,
 					 &oct_val, &oct_len) < 0)
 				return -EBADMSG;
 			if (oct_tag != 0x04)
-				return -EBADMSG;
+				return -EINVAL;
 			if (oct_len != hash_len)
-				return -EBADMSG;
+				return -EIO;
 			return memcmp(oct_val, expected_hash, hash_len) ?
 			       -EBADMSG : 0;
 		}
@@ -206,15 +206,12 @@ int ts_info_verify(const struct ts_info_t *info,
  *      signedAttrs.messageDigest so a substituted TSTInfo is caught.
  *   2. Compute hash(0x31 || DER_length || signedAttrs_content) — the
  *      SET tag substitution required by RFC 5652 §5.4.
- *   3. Look up the TSA key by converting info->policy OID to its
- *      dotted-decimal string (e.g. "1.3.6.1.4.1.4146.2.2") and calling
- *      keyring_find_key().  Register TSA keys under the policy OID string.
+ *   3. Look up the TSA key from the "tsp" keyring and verify the signature.
  */
 int ts_verify_cms_signature(const struct ts_info_t *info,
 			    const struct ts_signer_info_t *signer,
 			    const char *keyring)
 {
-	char policy_oid_str[64];
 	const struct public_key *key;
 	enum hash_algo algo;
 	struct digest *d;
@@ -228,15 +225,10 @@ int ts_verify_cms_signature(const struct ts_info_t *info,
 	    !signer->raw_econtent.data)
 		return -EINVAL;
 
-	/* Derive key name from TSTInfo policy OID */
 	if (!info->policy.data || !info->policy.len)
 		return -ENOKEY;
-	ret = sprint_oid(info->policy.data, info->policy.len,
-			 policy_oid_str, sizeof(policy_oid_str));
-	if (ret < 0)
-		return -ENOKEY;
 
-	key = keyring_find_key(keyring_find(keyring), policy_oid_str);
+	key = keyring_find_key(keyring_find(keyring), "tsp");
 	if (!key)
 		return -ENOKEY;
 
@@ -248,6 +240,7 @@ int ts_verify_cms_signature(const struct ts_info_t *info,
 	d = digest_alloc_by_algo(algo);
 	if (!d)
 		return -ENOENT;
+
 	hash_len = digest_length(d);
 	digest_init(d);
 	digest_update(d, signer->raw_econtent.data, signer->raw_econtent.len);
@@ -271,7 +264,7 @@ int ts_verify_cms_signature(const struct ts_info_t *info,
 	digest_final(d, hash);
 	digest_free(d);
 
-	/* Step 3: verify signature with the policy-keyed TSA key */
+	/* Step 3: verify signature with the TSA key */
 	return public_key_verify(key,
 				 signer->signature.data,
 				 signer->signature.len,

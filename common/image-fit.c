@@ -288,6 +288,7 @@ static int fit_check_tsp_token(struct fit_handle *handle, const struct public_ke
 
 	gen_time = ts_info_get_time(&info);
 	if (gen_time > (uint64_t)key->not_after) {
+		
 		pr_err("The key that signed the image was expired at the time of signing (gen_time %llu > not_after %llu)\n",
 		       (unsigned long long)gen_time, (unsigned long long)key->not_after);
 		return -EINVAL;

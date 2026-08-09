@@ -287,5 +287,7 @@ uint64_t ts_info_get_time(const struct ts_info_t *info)
 	sec   = D2(s + 12);
 #undef D2
 
+	pr_info("signature date: %02d/%02d/%04d %02d:%02d:%02d\n", day, month, year, hour, min, sec);
+
 	return (uint64_t)mktime(year, month, day, hour, min, sec);
 }

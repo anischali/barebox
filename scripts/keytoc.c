@@ -62,15 +62,20 @@ static int openssl_error(const char *fmt, ...)
 	return -1;
 }
 
+static time_t asn1_time_to_ktime_t(const ASN1_TIME *t);
+
 /**
  * pem_get_pub_key() - read a public key from a .crt file
  *
  * @keydir:	Directory containins the key
  * @name	Name of key file (will have a .crt extension)
  * @key		Returns key object, or NULL on failure
+ * @before	Returns certificate's notBefore, or -1 if not a certificate
+ * @after	Returns certificate's notAfter, or -1 if not a certificate
  * @return 0 if ok, -ve on error (in which case *rsap will be set to NULL)
  */
-static int pem_get_pub_key(const char *path, EVP_PKEY **pkey)
+static int pem_get_pub_key(const char *path, EVP_PKEY **pkey,
+			    time_t *before, time_t *after)
 {
 	EVP_PKEY *key;
 	X509 *cert;
@@ -78,6 +83,8 @@ static int pem_get_pub_key(const char *path, EVP_PKEY **pkey)
 	int ret;
 
 	*pkey = NULL;
+	*before = -1;
+	*after = -1;
 	f = fopen(path, "r");
 	if (!f) {
 		fprintf(stderr, "Couldn't open certificate '%s': %s\n",
@@ -104,6 +111,10 @@ static int pem_get_pub_key(const char *path, EVP_PKEY **pkey)
 			ret = -EINVAL;
 			goto err_pubkey;
 		}
+
+		/* Grab the validity period while we still have the cert */
+		*before = asn1_time_to_ktime_t(X509_get0_notBefore(cert));
+		*after = asn1_time_to_ktime_t(X509_get0_notAfter(cert));
 	}
 
 	fclose(f);
@@ -517,13 +528,13 @@ err:
 	return ret ? -EINVAL : 0;
 }
 
-static int gen_key_ecdsa(EVP_PKEY *key, struct keyinfo *info)
+static int gen_key_ecdsa(EVP_PKEY *key, time_t before, time_t after,
+			  struct keyinfo *info)
 {
 	char group[128];
 	size_t outlen;
 	int ret, bits;
 	BIGNUM *key_x = NULL, *key_y = NULL;
-	time_t before = -1, after = -1;
 
 	key = reimport_key(key);
 	if (!key)
@@ -543,9 +554,6 @@ static int gen_key_ecdsa(EVP_PKEY *key, struct keyinfo *info)
 	ret = EVP_PKEY_get_bn_param(key, OSSL_PKEY_PARAM_EC_PUB_Y, &key_y);
 	if (!ret)
 		return -EINVAL;
-
-	before = asn1_time_to_ktime_t(X509_get0_notBefore((X509 *)key));
-	after = asn1_time_to_ktime_t(X509_get0_notAfter((X509 *)key));
 
 	if (dts) {
 		fprintf(stderr, "ERROR: generating a dts snippet for ECDSA keys is not yet supported\n");
@@ -624,12 +632,12 @@ static char *try_resolve_env(char *input)
 	return var;
 }
 
-static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
+static int gen_key_rsa(EVP_PKEY *key, time_t before, time_t after,
+			struct keyinfo *info)
 {
 	BIGNUM *modulus, *r_squared;
 	uint64_t exponent = 0;
 	uint32_t n0_inv;
-	time_t before = -1, after = -1;
 	int bits;
 	int ret;
 
@@ -690,9 +698,6 @@ static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
 			fprintf(outfilep, "static const struct rsa_public_key %s = {\n", info->name_c);
 		}
 
-		before = asn1_time_to_ktime_t(X509_get0_notBefore((X509 *)key));
-		after = asn1_time_to_ktime_t(X509_get0_notAfter((X509 *)key));
-
 		fprintf(outfilep, "\t.len = %d,\n", bits / 32);
 		fprintf(outfilep, "\t.n0inv = 0x%0x,\n", n0_inv);
 		fprintf(outfilep, "\t.modulus = %s_modulus,\n", info->name_c);
@@ -731,6 +736,7 @@ static int gen_key(struct keyinfo *info)
 {
 	int ret;
 	EVP_PKEY *key;
+	time_t before = -1, after = -1;
 
 	if (!info->path)
 		exit(1);
@@ -740,18 +746,18 @@ static int gen_key(struct keyinfo *info)
 		if (ret)
 			exit(1);
 	} else {
-		ret = pem_get_pub_key(info->path, &key);
+		ret = pem_get_pub_key(info->path, &key, &before, &after);
 		if (ret)
 			exit(1);
 	}
 
 	/* generate built-in keys */
-	ret = gen_key_ecdsa(key, info);
+	ret = gen_key_ecdsa(key, before, after, info);
 	if (ret == -EOPNOTSUPP)
 		return ret;
 
 	if (ret)
-		ret = gen_key_rsa(key, info);
+		ret = gen_key_rsa(key, before, after, info);
 
 	return ret;
 }

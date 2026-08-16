@@ -287,7 +287,7 @@ static int efi_late_init(void)
 	void *fdt;
 	int ret;
 
-	if (!IS_ENABLED(CONFIG_STATE))
+	if (!IS_ENABLED(CONFIG_EXTERNAL_STATE))
 		return 0;
 
 	if (!get_mounted_path("/boot")) {

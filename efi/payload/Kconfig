@@ -4,6 +4,14 @@ config EFI_PAYLOAD_ESP_IMAGE
 	bool "Generate barebox.esp image from payload"
 	depends on EFI_STUB || !PBL_IMAGE
 
+config EXTERNAL_STATE
+	bool "External state"
+	depends on EFI_PAYLOAD
+	depends on STATE
+	help
+	  Select this in order to include support for external state
+	  which allows laoding a state dtb file from an ESP.
+
 config EFI_HANDOVER_PROTOCOL
 	bool "EFI Handover protocol (DEPRECATED)"
 	depends on X86

@@ -47,6 +47,7 @@ policy-list
 *.dtbo
 *.dtbo.*
 *.z
+/crypto/public-keys.h
 
 #
 # Top-level generic files

@@ -403,6 +403,17 @@ struct public_key *rsa_of_read_key(struct device_node *node)
 	of_property_read_u32(node, "rsa,num-bits", &rsa->len);
 	of_property_read_u32(node, "rsa,n0-inverse", &rsa->n0inv);
 
+	/*
+	 * Validity window to support TSA RFC 3161 TimeStampToken checks.
+	 * not_after defaults to -1 ("no restriction"): cast to uint64_t it
+	 * becomes UINT64_MAX, so a gen_time > not_after comparison never
+	 * trips unless the devicetree explicitly sets rsa,not-after.
+	 */
+	key->not_before = 0;
+	key->not_after = -1;
+	of_property_read_u64(node, "rsa,not-before", &key->not_before);
+	of_property_read_u64(node, "rsa,not-after", &key->not_after);
+
 	public_exponent = of_get_property(node, "rsa,exponent", &length);
 	if (!public_exponent || length < sizeof(*public_exponent))
 		rsa->exponent = RSA_DEFAULT_PUBEXP;

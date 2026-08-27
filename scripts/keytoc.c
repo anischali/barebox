@@ -65,15 +65,20 @@ static int openssl_error(const char *fmt, ...)
 	return -1;
 }
 
+static time_t asn1_time_to_ktime_t(const ASN1_TIME *t);
+
 /**
  * pem_get_pub_key() - read a public key from a .crt file
  *
  * @keydir:	Directory containins the key
  * @name	Name of key file (will have a .crt extension)
  * @key		Returns key object, or NULL on failure
+ * @before	Returns certificate's notBefore, or -1 if not a certificate
+ * @after	Returns certificate's notAfter, or -1 if not a certificate
  * @return 0 if ok, -ve on error (in which case *rsap will be set to NULL)
  */
-static int pem_get_pub_key(const char *path, EVP_PKEY **pkey)
+static int pem_get_pub_key(const char *path, EVP_PKEY **pkey,
+			    time_t *before, time_t *after)
 {
 	EVP_PKEY *key;
 	X509 *cert;
@@ -81,6 +86,8 @@ static int pem_get_pub_key(const char *path, EVP_PKEY **pkey)
 	int ret;
 
 	*pkey = NULL;
+	*before = -1;
+	*after = -1;
 	f = fopen(path, "r");
 	if (!f) {
 		fprintf(stderr, "Couldn't open certificate '%s': %s\n",
@@ -107,6 +114,10 @@ static int pem_get_pub_key(const char *path, EVP_PKEY **pkey)
 			ret = -EINVAL;
 			goto err_pubkey;
 		}
+
+		/* Grab the validity period while we still have the cert */
+		*before = asn1_time_to_ktime_t(X509_get0_notBefore(cert));
+		*after = asn1_time_to_ktime_t(X509_get0_notAfter(cert));
 	}
 
 	fclose(f);
@@ -412,6 +423,17 @@ static int print_bignum(BIGNUM *num, int num_bits, int width)
 	return 0;
 }
 
+static time_t asn1_time_to_ktime_t(const ASN1_TIME *t)
+{
+    struct tm tm = {0};
+
+    if (ASN1_TIME_to_tm(t, &tm) != 1) {
+        return (time_t)-1;
+    }
+
+    return timegm(&tm); // UTC
+}
+
 /*
  * When imported from a HSM the key doesn't have the EC point parameters,
  * only the pubkey itself exists. Exporting the pubkey and creating a new
@@ -509,7 +531,8 @@ err:
 	return ret ? -EINVAL : 0;
 }
 
-static int gen_key_ecdsa(EVP_PKEY *key, struct keyinfo *info)
+static int gen_key_ecdsa(EVP_PKEY *key, time_t before, time_t after,
+			  struct keyinfo *info)
 {
 	char group[128];
 	size_t outlen;
@@ -576,6 +599,8 @@ static int gen_key_ecdsa(EVP_PKEY *key, struct keyinfo *info)
 				fprintf(outfilep, "\t.key_name_hint = \"%s\",\n", info->name_hint);
 			fprintf(outfilep, "\t.hash = %s_hash,\n", info->name_c);
 			fprintf(outfilep, "\t.hashlen = %u,\n", SHA256_DIGEST_LENGTH);
+			fprintf(outfilep, "\t.not_before = %lld,\n", (long long)before);
+			fprintf(outfilep, "\t.not_after = %lld,\n", (long long)after);
 			fprintf(outfilep, "\t.ecdsa = &%s,\n", info->name_c);
 			fprintf(outfilep, "};\n");
 			for (i = 0; i < info->nr_keyrings; i++) {
@@ -610,7 +635,8 @@ static char *try_resolve_env(char *input)
 	return var;
 }
 
-static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
+static int gen_key_rsa(EVP_PKEY *key, time_t before, time_t after,
+			struct keyinfo *info)
 {
 	BIGNUM *modulus, *r_squared;
 	uint64_t exponent = 0;
@@ -691,6 +717,8 @@ static int gen_key_rsa(EVP_PKEY *key, struct keyinfo *info)
 				fprintf(outfilep, "\t.key_name_hint = \"%s\",\n", info->name_hint);
 			fprintf(outfilep, "\t.hash = %s_hash,\n", info->name_c);
 			fprintf(outfilep, "\t.hashlen = %u,\n", SHA256_DIGEST_LENGTH);
+			fprintf(outfilep, "\t.not_before = %lld,\n", (long long)before);
+			fprintf(outfilep, "\t.not_after = %lld,\n", (long long)after);
 			fprintf(outfilep, "\t.rsa = &%s,\n", info->name_c);
 			fprintf(outfilep, "};\n");
 			for (i = 0; i < info->nr_keyrings; i++) {
@@ -711,6 +739,7 @@ static int gen_key(struct keyinfo *info)
 {
 	int ret;
 	EVP_PKEY *key;
+	time_t before = -1, after = -1;
 
 	if (!info->path)
 		exit(1);
@@ -720,18 +749,18 @@ static int gen_key(struct keyinfo *info)
 		if (ret)
 			exit(1);
 	} else {
-		ret = pem_get_pub_key(info->path, &key);
+		ret = pem_get_pub_key(info->path, &key, &before, &after);
 		if (ret)
 			exit(1);
 	}
 
 	/* generate built-in keys */
-	ret = gen_key_ecdsa(key, info);
+	ret = gen_key_ecdsa(key, before, after, info);
 	if (ret == -EOPNOTSUPP)
 		return ret;
 
 	if (ret)
-		ret = gen_key_rsa(key, info);
+		ret = gen_key_rsa(key, before, after, info);
 
 	return ret;
 }

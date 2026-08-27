@@ -769,13 +769,17 @@ static bool is_identifier(char **s)
 {
 	char *p = *s;
 
-	/* [a-zA-Z_] */
-	if (!(isalpha(*p) || *p == '_'))
+	/*
+	 * [a-zA-Z0-9_] to start, so a dotted-decimal OID (e.g. a TSA policy
+	 * OID used as fit-hint) is accepted as a value alongside plain
+	 * identifiers like "keyring" and "fit-hint".
+	 */
+	if (!(isalnum(*p) || *p == '_'))
 		return false;
 	p++;
 
-	/* [a-zA-Z0-9_-]* */
-	while (isalnum(*p) || *p == '_' || *p == '-')
+	/* [a-zA-Z0-9_.-]* */
+	while (isalnum(*p) || *p == '_' || *p == '-' || *p == '.')
 		p++;
 
 	*s = p;

@@ -1,0 +1,47 @@
+--- RFC 3161 TimeStampResp ASN.1 definition
+---
+--- Copyright (C) 2024. All Rights Reserved.
+---
+--- Reference: RFC 3161 - Internet X.509 PKI Time-Stamp Protocol
+---
+--- This file is to be used with the Linux kernel ASN.1 compiler
+--- (scripts/asn1_compiler) and follows the same conventions as
+--- x509.asn1, pkcs7.asn1 found in crypto/ and certs/
+---
+--- TSTInfo is parsed in a second pass via tstinfo.asn1 because it
+--- is DER-encoded inside the eContent OCTET STRING.
+---
+
+TimeStampResp ::= SEQUENCE {
+	status          PKIStatusInfo ({ tsa_status }),
+	timeStampToken  TimeStampToken OPTIONAL ({ tsa_timestamp_token })
+}
+
+PKIStatusInfo ::= SEQUENCE {
+	status        INTEGER,
+	statusString  OCTET STRING     OPTIONAL,
+	failInfo      INTEGER  OPTIONAL
+}
+
+--- timeStampToken = CMS ContentInfo wrapping SignedData
+
+TimeStampToken ::= ContentInfo
+
+ContentInfo ::= SEQUENCE {
+	contentType  OBJECT IDENTIFIER ({ tsa_content_type }),
+	content      [0] EXPLICIT SignedData ({ tsa_cms_content })
+}
+
+SignedData ::= SEQUENCE {
+	version          INTEGER ({ tsa_cms_version }),
+	digestAlgorithms ANY,
+	encapContentInfo EncapsulatedContentInfo,
+	certificates     ANY OPTIONAL,
+	crls             ANY OPTIONAL,
+	signerInfos      ANY OPTIONAL
+}
+
+EncapsulatedContentInfo ::= SEQUENCE {
+	eContentType  OBJECT IDENTIFIER ({ tsa_cms_econtent_type }),
+	eContent      [0] EXPLICIT OCTET STRING OPTIONAL ({ tsa_cms_econtent })
+}

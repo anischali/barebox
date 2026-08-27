@@ -1,0 +1,39 @@
+--- RFC 3161 TSTInfo ASN.1 definition
+---
+--- Copyright (C) 2024. All Rights Reserved.
+---
+--- Reference: RFC 3161 - Internet X.509 PKI Time-Stamp Protocol
+---
+--- This file decodes the inner TSTInfo structure, which is DER-encoded
+--- inside the EncapsulatedContentInfo.eContent OCTET STRING.
+---
+--- Note: Accuracy is inlined (not a named type ref) so that the asn1_compiler
+--- generates MATCH_JUMP_OR_SKIP rather than a plain MATCH for the OPTIONAL case.
+---
+
+TSTInfo ::= SEQUENCE {
+	version         INTEGER ({ tsa_tstinfo_version }),
+	policy          OBJECT IDENTIFIER ({ tsa_tstinfo_policy }),
+	messageImprint  MessageImprint,
+	serialNumber    INTEGER ({ tsa_tstinfo_serial }),
+	genTime         GeneralizedTime ({ tsa_tstinfo_gentime }),
+	accuracy        SEQUENCE {
+		seconds  INTEGER OPTIONAL,
+		millis   [0] IMPLICIT INTEGER OPTIONAL,
+		micros   [1] IMPLICIT INTEGER OPTIONAL
+	} OPTIONAL,
+	ordering        BOOLEAN OPTIONAL ({ tsa_tstinfo_ordering }),
+	nonce           INTEGER OPTIONAL ({ tsa_tstinfo_nonce }),
+	tsa             [0] EXPLICIT ANY OPTIONAL,
+	extensions      [1] IMPLICIT ANY OPTIONAL
+}
+
+MessageImprint ::= SEQUENCE {
+	hashAlgorithm  AlgorithmIdentifier,
+	hashedMessage  OCTET STRING ({ tsa_tstinfo_impr_hashed_message })
+}
+
+AlgorithmIdentifier ::= SEQUENCE {
+	algorithm    OBJECT IDENTIFIER ({ tsa_tstinfo_impr_algo }),
+	parameters   ANY OPTIONAL
+}

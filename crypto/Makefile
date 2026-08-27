@@ -20,7 +20,13 @@ obj-$(CONFIG_CRYPTO_RSA)	+= rsa.o
 obj-$(CONFIG_CRYPTO_BUILTIN_KEYS)      += public-keys.o
 obj-$(CONFIG_CRYPTO_ECC)	+= ecc.o
 obj-$(CONFIG_CRYPTO_ECDSA) 	+= ecdsa.o
+obj-$(CONFIG_CRYPTO_TS)		+= ts.o
+ts-y				:= ts.asn1.o ts_parser.o ts_verify.o tstinfo.asn1.o signerinfo.asn1.o
 
+$(obj)/ts.asn1.o: $(obj)/ts.asn1.c $(obj)/ts.asn1.h
+$(obj)/tstinfo.asn1.o: $(obj)/tstinfo.asn1.c $(obj)/tstinfo.asn1.h
+$(obj)/signerinfo.asn1.o: $(obj)/signerinfo.asn1.c $(obj)/signerinfo.asn1.h
+$(obj)/ts_parser.o: $(obj)/ts.asn1.h $(obj)/tstinfo.asn1.h $(obj)/signerinfo.asn1.h
 
 extra-$(CONFIG_CRYPTO_BUILTIN_KEYS) += public-keys.h
 

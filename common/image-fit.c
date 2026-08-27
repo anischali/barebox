@@ -17,11 +17,13 @@
 #include <malloc.h>
 #include <linux/ctype.h>
 #include <linux/refcount.h>
+#include <linux/oid_registry.h>
 #include <asm/byteorder.h>
 #include <errno.h>
 #include <linux/err.h>
 #include <stringlist.h>
 #include <crypto/public_key.h>
+#include <crypto/ts.h>
 #include <uncompress.h>
 #include <image-fit.h>
 #include <fuzz.h>
@@ -248,6 +250,74 @@ static struct digest *fit_alloc_digest(struct device_node *sig_node,
 	return digest;
 }
 
+
+static int fit_check_tsa_token(struct fit_handle *handle, const struct public_key *key, struct device_node *sig_node,
+			       enum hash_algo algo, const char *sig_value, int sig_len)
+{	
+	const char *tsa_value;
+	int tsa_len, ret, status;
+	struct ts_info_t info;
+	struct ts_signer_info_t signer;
+	char policy_oid_str[64];
+	uint64_t gen_time;
+	
+	tsa_value = of_get_property(sig_node, "tsa-token", &tsa_len);
+	if (!tsa_value) {
+		pr_err("TSA token not found in %pOF\n", sig_node);
+		return -EINVAL;
+	}
+
+	ret = ts_parse_response(tsa_value, tsa_len,
+		      &status, &info, &signer);
+	if (ret) {
+		pr_err("Failed to parse TSA token: %d\n", ret);
+		return -EINVAL;
+	}
+
+	if (status > 1) {
+		pr_err("TSA response rejected (PKIStatus=%d)\n", status);
+		return -EINVAL;
+	}
+
+	ret = ts_info_verify(&info, sig_value, sig_len);
+	if (ret) {
+		pr_err("TSA token message imprint verification failed: %d\n", ret);
+		return -EBADMSG;
+	}
+
+	ret = ts_verify_cms_signature(&info, &signer, "tsa");
+	if (ret) {
+		pr_err("TSA token signature verification failed: %d\n", ret);
+		return -EBADMSG;
+	}
+
+	gen_time = ts_info_get_time(&info);
+	if (gen_time < (uint64_t)key->not_before) {
+		pr_err("The key that signed the image was not yet valid at the time of signing (gen_time %llu < not_before %llu)\n",
+		       (unsigned long long)gen_time, (unsigned long long)key->not_before);
+		return -EINVAL;
+	}
+
+	if (gen_time > (uint64_t)key->not_after) {
+		pr_err("The key that signed the image was expired at the time of signing (gen_time %llu > not_after %llu)\n",
+		       (unsigned long long)gen_time, (unsigned long long)key->not_after);
+		return -EINVAL;
+	}
+
+
+	ret = sprint_oid(info.policy.data, info.policy.len,
+			 policy_oid_str, sizeof(policy_oid_str));
+	if (ret < 0)
+		return -ENOKEY;
+
+	pr_info("TSA token info status: %d, policy OID: %s\n",
+		status, policy_oid_str);
+
+
+	return 0;
+}
+
+
 static int fit_check_signature(struct fit_handle *handle, struct device_node *sig_node,
 			       enum hash_algo algo, void *hash)
 {
@@ -308,6 +378,11 @@ static int fit_check_signature(struct fit_handle *handle, struct device_node *si
 
 	return -EBADMSG;
 ok:
+#ifdef CONFIG_BOOTM_FORCE_SIGNED_IMAGES_WITH_TSA
+		pr_info("image signature OK, but not fully verified due to TSA token\n");
+		return fit_check_tsa_token(handle, key, sig_node, algo, sig_value, sig_len);
+#endif
+
 	return 0;
 }
 
@@ -805,6 +880,7 @@ int fit_config_verify_signature(struct fit_handle *handle, struct device_node *c
 	case BOOTM_VERIFY_HASH:
 		return 0;
 	case BOOTM_VERIFY_SIGNATURE:
+	case BOOTM_VERIFY_TSA_TOKEN:
 		ret = -EINVAL;
 		break;
 	case BOOTM_VERIFY_AVAILABLE:

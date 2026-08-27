@@ -796,6 +796,17 @@ config BOOTM_FORCE_SIGNED_IMAGES
 	  are refused to boot. Effectively this means only FIT images can be booted
 	  since they are the only supported image type that support signing.
 
+config BOOTM_FORCE_SIGNED_IMAGES_WITH_TSA
+	bool
+	prompt "Force booting of signed and TSA stamped images"
+	depends on BOOTM_FITIMAGE_SIGNATURE
+	select CRYPTO_TS
+	select BOOTM_FORCE_SIGNED_IMAGES
+	help
+	  With this option enabled only signed images with a valid TSA token can be booted, this permits
+	  also in case of revoked keys to boot images that are signed prior to keyes revocation, and refuse
+	  all images that are signed after the keys are revoked.
+
 config BOOTM_OPTIONAL_SIGNED_IMAGES
 	def_bool !BOOTM_FORCE_SIGNED_IMAGES
 	select HAS_INSECURE_DEFAULTS

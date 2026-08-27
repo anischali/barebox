@@ -37,6 +37,7 @@ rk-usb-loader-target
 rkimage
 mips-relocs
 keytoc
+asn1_compiler
 mvebuimg
 prelink-riscv
 imx9image

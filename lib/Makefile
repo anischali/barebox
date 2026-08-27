@@ -95,6 +95,8 @@ obj-$(CONFIG_CRC16)	+= crc16.o
 obj-$(CONFIG_NLS)	+= nls_base.o
 obj-$(CONFIG_CHARSET) 	+= charset.o
 
+obj-$(CONFIG_ASN1)	+= asn1_decoder.o
+
 obj-$(CONFIG_FSL_QE_FIRMWARE) += fsl-qe-firmware.o
 obj-$(CONFIG_UBSAN_STANDALONE)	+= ubsan.o
 obj-$(CONFIG_GENERIC_ALLOCATOR) += genalloc.o

@@ -41,6 +41,7 @@ hostprogs-always-$(CONFIG_OMAP4_HOSTTOOL_USBBOOT)	+= omap4_usbboot
 HOSTCFLAGS_rk-usb-loader.o = `$(PKG_CONFIG) --cflags libusb-1.0`
 HOSTLDLIBS_rk-usb-loader  = `$(PKG_CONFIG) --libs libusb-1.0`
 hostprogs-always-$(CONFIG_RK_USB_LOADER)		+= rk-usb-loader
+hostprogs-always-$(CONFIG_ASN1)				+= asn1_compiler
 
 userprogs-always-$(CONFIG_BAREBOXENV_TARGET)		+= bareboxenv-target
 userprogs-always-$(CONFIG_BAREBOXTLV_TARGET)		+= bareboxtlv-target

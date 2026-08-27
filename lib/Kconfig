@@ -188,6 +188,12 @@ config CRC8
 config CRC16
 	bool "CRC16 function"
 
+config ASN1
+	bool "ASN.1 decoder"
+	help
+	  This option provides a minimalistic ASN.1 decoder, which is used by
+	  the X.509 certificate handling code in crypto/public-keys.c.
+
 source "lib/gui/Kconfig"
 
 source "lib/fonts/Kconfig"

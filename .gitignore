@@ -47,6 +47,8 @@ policy-list
 *.dtbo
 *.dtbo.*
 *.z
+*.asn1.c
+*.asn1.h
 /crypto/public-keys.h
 
 #

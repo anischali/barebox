@@ -217,6 +217,75 @@ int public_key_add(const char *keyring, const struct public_key *key)
 	return keyring_link_key(kr, key);
 }
 
+/*
+ * CMS ECDSA signatures are DER-encoded SEQUENCE { INTEGER r, INTEGER s }.
+ * ecdsa_verify() expects raw r||s (each coord_bytes wide, zero-padded).
+ */
+static int ecdsa_sig_der_to_raw(const uint8_t *sig, size_t sig_len,
+				uint8_t *out, unsigned int coord_bytes)
+{
+	const uint8_t *p = sig;
+	size_t rem = sig_len;
+	size_t seq_len;
+	int i;
+
+	if (rem < 2 || *p++ != 0x30)
+		return -EBADMSG;
+
+	seq_len = *p++;
+	rem -= 2;
+	if (seq_len & 0x80) {
+		int n = seq_len & 0x7f;
+		if (n < 1 || n > 2 || rem < (size_t)n)
+			return -EBADMSG;
+		seq_len = 0;
+		for (i = 0; i < n; i++)
+			seq_len = (seq_len << 8) | *p++;
+		rem -= n;
+	}
+	if (seq_len > rem)
+		return -EBADMSG;
+	/* bound the INTEGER parsing below to the SEQUENCE's declared content */
+	rem = seq_len;
+
+	for (i = 0; i < 2; i++) {
+		size_t ilen;
+		uint8_t *dst;
+
+		if (rem < 2 || *p++ != 0x02)
+			return -EBADMSG;
+		ilen = *p++;
+		rem -= 2;
+		if (ilen > rem)
+			return -EBADMSG;
+
+		/* strip sign-extension byte */
+		if (ilen > 0 && *p == 0x00) {
+			p++; ilen--; rem--;
+		}
+		if (ilen > coord_bytes)
+			return -EBADMSG;
+
+		dst = out + i * coord_bytes;
+		memset(dst, 0, coord_bytes);
+		memcpy(dst + coord_bytes - ilen, p, ilen);
+		p += ilen;
+		rem -= ilen;
+	}
+	if (rem != 0)
+		return -EBADMSG;
+	return 0;
+}
+
+static unsigned int ecdsa_coord_bytes(const char *curve_name)
+{
+	if (!strcmp(curve_name, "prime256v1"))
+		return 32;
+	if (!strcmp(curve_name, "secp384r1"))
+		return 48;
+	return 0;
+}
+
 int public_key_verify(const struct public_key *key, const uint8_t *sig,
 		      const uint32_t sig_len, const uint8_t *hash,
 		      enum hash_algo algo)
@@ -224,8 +293,18 @@ int public_key_verify(const struct public_key *key, const uint8_t *sig,
 	switch (key->type) {
 	case PUBLIC_KEY_TYPE_RSA:
 		return rsa_verify(key->rsa, sig, sig_len, hash, algo);
-	case PUBLIC_KEY_TYPE_ECDSA:
-		return ecdsa_verify(key->ecdsa, sig, sig_len, hash);
+	case PUBLIC_KEY_TYPE_ECDSA: {
+		uint8_t raw_sig[96]; /* fits P-256 (64) and P-384 (96) */
+		unsigned int coord_bytes = ecdsa_coord_bytes(key->ecdsa->curve_name);
+		int ret;
+
+		if (!coord_bytes)
+			return -ENOSYS;
+		ret = ecdsa_sig_der_to_raw(sig, sig_len, raw_sig, coord_bytes);
+		if (ret < 0)
+			return -EBADMSG;
+		return ecdsa_verify(key->ecdsa, raw_sig, coord_bytes * 2, hash);
+	}
 	}
 
 	return -ENOKEY;

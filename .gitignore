@@ -50,6 +50,7 @@ policy-list
 *.asn1.c
 *.asn1.h
 /crypto/public-keys.h
+/lib/oid_registry_data.c
 
 #
 # Top-level generic files

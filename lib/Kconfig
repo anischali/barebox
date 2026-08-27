@@ -194,6 +194,13 @@ config ASN1
 	  This option provides a minimalistic ASN.1 decoder, which is used by
 	  the X.509 certificate handling code in crypto/public-keys.c.
 
+config OID_REGISTRY
+	bool "OID registry"
+	help
+	  This option provides a registry for mapping between OIDs and their
+	  human-readable names, which is used by the X.509 certificate handling
+	  code in crypto/public-keys.c.
+
 source "lib/gui/Kconfig"
 
 source "lib/fonts/Kconfig"

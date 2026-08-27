@@ -153,6 +153,7 @@ static const char * const bootm_verify_names[] = {
 	[BOOTM_VERIFY_AVAILABLE] = "available",
 #endif
 	[BOOTM_VERIFY_SIGNATURE] = "signature",
+	[BOOTM_VERIFY_TSA_TOKEN] = "tsa_token",
 };
 
 /*

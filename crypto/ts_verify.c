@@ -223,8 +223,10 @@ int ts_verify_cms_signature(const struct ts_info_t *info,
 	int ret;
 
 	if (!signer->signed_attrs.data || !signer->signature.data ||
-	    !signer->raw_econtent.data)
+	    !signer->raw_econtent.data) {
+		pr_err("Malformed signer informations\n");
 		return -EINVAL;
+	}
 
 	if (!info->policy.data || !info->policy.len)
 		return -ENOKEY;
@@ -235,8 +237,10 @@ int ts_verify_cms_signature(const struct ts_info_t *info,
 		return -ENOKEY;
 
 	key = keyring_find_key(keyring_find(keyring), policy_oid_str);
-	if (IS_ERR(key))
+	if (IS_ERR(key)) {
+		pr_err("No key found in the store with this OID: %s\n", policy_oid_str);
 		return PTR_ERR(key);
+	}
 
 	algo = oid_to_hash_algo(&signer->digest_algo_oid);
 	if (algo == HASH_ALGO__LAST)

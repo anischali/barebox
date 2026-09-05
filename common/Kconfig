@@ -802,6 +802,8 @@ config BOOTM_FORCE_SIGNED_IMAGES_WITH_TSA
 	depends on BOOTM_FITIMAGE_SIGNATURE
 	select CRYPTO_TS
 	select BOOTM_FORCE_SIGNED_IMAGES
+	select CONFIG_CRYPTO_ECDSA
+	select CONFIG_DIGEST_SHA512_GENERIC
 	help
 	  With this option enabled only signed images with a valid TSA token can be booted, this permits
 	  also in case of revoked keys to boot images that are signed prior to keyes revocation, and refuse

@@ -15,7 +15,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-FREETSA_URL = "https://freetsa.org/tsr"
+FREETSA_URL = "http://timestamp.digicert.com"
 
 
 def _run(*args):

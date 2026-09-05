@@ -379,8 +379,7 @@ static int fit_check_signature(struct fit_handle *handle, struct device_node *si
 	return -EBADMSG;
 ok:
 #ifdef CONFIG_BOOTM_FORCE_SIGNED_IMAGES_WITH_TSA
-		pr_info("image signature OK, but not fully verified due to TSA token\n");
-		return fit_check_tsa_token(handle, key, sig_node, algo, sig_value, sig_len);
+	return fit_check_tsa_token(handle, key, sig_node, algo, sig_value, sig_len);
 #endif
 
 	return 0;

@@ -5,6 +5,9 @@ Each tsa-stamp is inserted immediately after the signature node's value property
 Usage:
   ./tsa-stamp.py image.fit http://localhost:3161
   ./tsa-stamp.py image.fit freetsa --ca-bundle tsa-keys/freetsa-bundle.pem
+  ./tsa-stamp.py image.fit digitcert
+  ./tsa-stamp.py image.fit sectigo
+  ./tsa-stamp.py image.fit globalsign
 """
 
 import argparse
@@ -14,8 +17,23 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
-FREETSA_URL = "http://timestamp.digicert.com"
+# Known public RFC 3161 TSA aliases -> TSP endpoint URL.
+# Any other string passed as tsa_url is used verbatim (with http:// prepended
+# if no scheme is given).
+TSA_ALIASES = {
+    "freetsa":    "https://freetsa.org/tsr",
+    "digicert":   "http://timestamp.digicert.com",
+    "sectigo":    "http://timestamp.sectigo.com",
+    # GlobalSign's RFC 3161 responder as pointed to by TBS Certificates'
+    # timestamping FAQ (https://www.tbs-certificates.co.uk/FAQ/en/globalsign_cs_timestamp.html);
+    # confirmed live and RFC 3161 (405 on a bare GET, matching the POST-only
+    # TSP protocol) — not to be confused with GlobalSign's legacy Authenticode
+    # endpoint at scripts/timstamp.dll, which is a different, non-RFC3161 wire format.
+    "globalsign": "http://pki.codegic.com/codegic-service/timestamp",
+    "codegic":    "http://pki.codegic.com/codegic-service/timestamp",
+}
 
 
 def _run(*args):
@@ -94,7 +112,38 @@ def _fdt_insert_prop(dtb, insert_at, prop_name, prop_data):
     return new_dtb
 
 
-def _request_token(sig_bytes, url, ca, tmp):
+def _extract_tsa_cert(resp_f, tmp, pem_out):
+    """Pull the TSA's own signing certificate out of a timestamp response and
+    save it as PEM at pem_out, for embedding in the bootloader's trust store
+    (CONFIG_CRYPTO_PUBLIC_KEYS keyring=tsa,fit-hint=<policy OID>:pem_out).
+
+    Requires the query to have been made with certReq=true (the -cert flag
+    below): only then is the TSA required by RFC 3161 to embed its signing
+    cert in the response's CMS SignedData.certificates field.
+    """
+    token_f = f"{tmp}/token.der"
+    steps = [
+        (["openssl", "ts", "-reply", "-in", resp_f,
+          "-out", token_f, "-token_out"], "extracting TimeStampToken from response"),
+        (["openssl", "pkcs7", "-inform", "DER", "-in", token_f,
+          "-print_certs", "-out", str(pem_out)], "extracting certificates from token"),
+    ]
+    for cmd, desc in steps:
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"[!] {desc} failed:\n{r.stderr.strip()}", file=sys.stderr)
+            return None
+
+    if not Path(pem_out).stat().st_size:
+        return None
+
+    subject = subprocess.run(
+        ["openssl", "x509", "-in", str(pem_out), "-noout", "-subject"],
+        capture_output=True, text=True).stdout.strip()
+    return subject or "(certificate extracted, subject unreadable)"
+
+
+def _request_token(sig_bytes, url, ca, tmp, pem_out):
     sig_f, req_f, resp_f = f"{tmp}/sig.bin", f"{tmp}/ts.req", f"{tmp}/ts.resp"
     Path(sig_f).write_bytes(sig_bytes)
     _run("openssl", "ts", "-query", "-data", sig_f, "-sha256", "-cert", "-no_nonce", "-out", req_f)
@@ -109,19 +158,41 @@ def _request_token(sig_bytes, url, ca, tmp):
     if ca:
         _run("openssl", "ts", "-verify", "-queryfile", req_f, "-in", resp_f, "-CAfile", ca)
 
-    return token
+    r = subprocess.run(["openssl", "ts", "-reply", "-in", resp_f, "-text"],
+                        capture_output=True, text=True)
+    policy_oid = None
+    for line in r.stdout.splitlines():
+        if "polic" in line.lower():
+            print(f"    {line.strip()}")
+            policy_oid = line.split(":", 1)[-1].strip()
+
+    if pem_out is not None and not pem_out.exists():
+        subject = _extract_tsa_cert(resp_f, tmp, pem_out)
+        if subject:
+            print(f"[*] TSA certificate extracted → {pem_out}  ({subject})")
+        else:
+            print(f"[!] TSA did not embed its certificate in the response "
+                  f"(no certReq support?) — {pem_out} not written", file=sys.stderr)
+
+    return token, policy_oid
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("image",   help="FIT image (modified in place)")
-    ap.add_argument("tsa_url", help="TSA server URL or 'freetsa'")
+    ap.add_argument("tsa_url", help="TSA server URL or one of: "
+                     + ", ".join(sorted(TSA_ALIASES)))
     ap.add_argument("--ca-bundle", help="CA bundle PEM for token verification")
+    ap.add_argument("--pem-out", help="where to save the TSA's signing certificate "
+                     "(PEM) for embedding in the bootloader's trust store "
+                     "(default: <tsa-host>.pem in the current directory)")
     args = ap.parse_args()
 
-    url = FREETSA_URL if args.tsa_url.lower() == "freetsa" else args.tsa_url
+    url = TSA_ALIASES.get(args.tsa_url.lower(), args.tsa_url)
     if not url.startswith("http"):
         url = f"http://{url}"
+
+    pem_out = Path(args.pem_out) if args.pem_out else Path(f"{urlparse(url).hostname}.pem")
 
     with tempfile.TemporaryDirectory() as tmp:
         ca = args.ca_bundle
@@ -147,9 +218,10 @@ def main():
 
         # fetch all tokens first (insert_at values are from the original, unpatched FDT)
         pending = []
+        policy_oid = None
         for node_path, value_bytes, insert_at in nodes:
             print(f"[*] {node_path}: requesting token for {len(value_bytes)}-byte signature")
-            token = _request_token(value_bytes, url, ca, tmp)
+            token, policy_oid = _request_token(value_bytes, url, ca, tmp, pem_out)
             print(f"    {len(token)} bytes {'[verified]' if ca else '[unverified]'}")
             pending.append((insert_at, node_path, token))
 
@@ -159,6 +231,13 @@ def main():
             print(f"[*] tsa-stamp inserted after value → {node_path}/tsa-token")
 
         Path(args.image).write_bytes(dtb)
+
+        if pem_out.exists():
+            hint = policy_oid or "<TSTInfo.policy OID>"
+            print(f"[*] Embed for verification: keyring=tsa,fit-hint={hint}:{pem_out}")
+        else:
+            print(f"[!] No TSA certificate was extracted this run — "
+                  f"{pem_out} not written, nothing to embed", file=sys.stderr)
 
 
 if __name__ == "__main__":

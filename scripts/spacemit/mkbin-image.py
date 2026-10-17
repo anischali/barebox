@@ -36,6 +36,8 @@ class ImageBinary(object):
         self.build_info_dict = {}
         self.temp_file_list = []
         self.key_file_list = []
+        # file data name -> path, overrides "source" of "file" data
+        self.file_override_dict = {}
 
         self.time_formt = {
             'year'      : '%Y',
@@ -518,7 +520,12 @@ class ImageBinary(object):
         """Get file data through file name.
         """
         name = file_info_dict.get("name", "empty_file")
-        binary_data = self.__get_source_data(file_info_dict.get("source", ""))
+        if name in self.file_override_dict:
+            # file injected from command line, takes precedence over config
+            with open(self.file_override_dict[name], 'rb') as f:
+                binary_data = f.read()
+        else:
+            binary_data = self.__get_source_data(file_info_dict.get("source", ""))
         align = file_info_dict.get("align", 1)
         binary_data = self._align_binary_data(binary_data, align)
         self.build_info_dict[name] = (binary_data, )
@@ -627,6 +634,8 @@ def main(argv):
     )
     parser.add_argument('-c',   dest = 'json_file',     required = True,    help = 'configuration json file')
     parser.add_argument('-o',   dest = 'output_file',   default = 'img.bin', help = 'output file')
+    parser.add_argument('-f',   dest = 'files',         action = 'append', default = [],
+                        metavar = 'NAME=PATH', help = 'use PATH as content of "file" data NAME')
 
     args = parser.parse_args()
     json_file = args.json_file
@@ -635,10 +644,18 @@ def main(argv):
     log = common_decorator.Logger()
     # log = common_decorator.Logger(clevel = 'DEBUG')
     image = ImageBinary(log)
+    for file_arg in args.files:
+        name, sep, path = file_arg.partition('=')
+        if not sep or not name or not os.path.isfile(path):
+            log.error(f"Invalid file override '{file_arg}'")
+            return 1
+        image.file_override_dict[name] = path
+
     config_info_dict = image.extract_config(json_file)
-    if config_info_dict and image.verify_config(config_info_dict):
-        image.build_image(config_info_dict, output_file)
+    if not config_info_dict or not image.verify_config(config_info_dict):
+        return 1
+    return 0 if image.build_image(config_info_dict, output_file) else 1
 
 
 if __name__ == '__main__':
-    main(sys.argv[1:])
+    sys.exit(main(sys.argv[1:]))

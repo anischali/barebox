@@ -177,12 +177,11 @@
         {
           "file": {
             "name": "fsbl",
-            "source": "../start_spacemit_k1.pblb",
             "align": 32
           }
         },
         {
-          "signature": {
+          "signature": {    
             "name": "signature1",
             "algorithm": "SHA256+RSA2048",
             "key": "spl_pubkey",

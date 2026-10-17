@@ -7,13 +7,44 @@ quiet_cmd_erizo_nmon_image = MKIMAGE $@
 $(obj)/%.nmon: $(obj)/%.img FORCE
 	$(call if_changed,erizo_nmon_image)
 
+spacemit-cfg := $(srctree)/scripts/spacemit/configs
+
+quiet_cmd_spacemit_mkbin = MKBIN   $@
+      cmd_spacemit_mkbin = $(PYTHON3) $(srctree)/scripts/spacemit/mkbin-image.py \
+			   -c $(2) -o $@ $(3)
+
+# Signed FSBL image: header + keys + barebox pblb + signature
+$(obj)/%.pblb.k1xfsbl: $(obj)/%.pblb $(spacemit-cfg)/fsbl.json FORCE
+	$(call if_changed,spacemit_mkbin,$(spacemit-cfg)/fsbl.json,-f fsbl=$<)
+
+$(obj)/k1x-bootinfo-%.bin: $(spacemit-cfg)/bootinfo_%.json FORCE
+	$(call if_changed,spacemit_mkbin,$<)
+
+# Boot media image: bootinfo at 0, FSBL at the offsets given by bootinfo
+quiet_cmd_k1x_boot_image = K1XBOOT $@
+      cmd_k1x_boot_image = $(PYTHON3) $(srctree)/scripts/spacemit/mkboot-image.py \
+			   -b $(word 2,$^) -f $< -o $@
+
+spacemit-k1x-media := emmc sd spinor spinand
+
+define spacemit_k1x_media_rule
+$$(obj)/%.pblb.k1x$(1): $$(obj)/%.pblb.k1xfsbl $$(obj)/k1x-bootinfo-$(1).bin FORCE
+	$$(call if_changed,k1x_boot_image)
+endef
+$(foreach m,$(spacemit-k1x-media),$(eval $(call spacemit_k1x_media_rule,$(m))))
+
 pblb-$(CONFIG_BOARD_ERIZO_GENERIC) += start_erizo_generic
 FILE_barebox-erizo-generic.img = start_erizo_generic.pblb
 image-$(CONFIG_BOARD_ERIZO_GENERIC) += barebox-erizo-generic.img barebox-erizo-generic.nmon
 
-pblb-$(CONFIG_BOARD_SPACEMIT_K1) += start_spacemit_k1
-FILE_barebox-spacemit-k1.img = start_spacemit_k1.pblb
-image-$(CONFIG_BOARD_SPACEMIT_K1) += barebox-spacemit-k1.img
+pblb-$(CONFIG_BOARD_SPACEMIT_K1) += start_pbl_spacemit_k1x
+FILE_barebox-spacemit-k1x.img = start_pbl_spacemit_k1x.pblb
+FILE_barebox-spacemit-k1x-fsbl.img = start_pbl_spacemit_k1x.pblb.k1xfsbl
+$(foreach m,$(spacemit-k1x-media), \
+	$(eval FILE_barebox-spacemit-k1x-$(m).img = start_pbl_spacemit_k1x.pblb.k1x$(m)))
+image-$(CONFIG_BOARD_SPACEMIT_K1) += barebox-spacemit-k1x.img barebox-spacemit-k1x-fsbl.img \
+	$(patsubst %,barebox-spacemit-k1x-%.img,$(spacemit-k1x-media))
+targets += $(patsubst %,k1x-bootinfo-%.bin,$(spacemit-k1x-media))
 
 pblb-$(CONFIG_BOARD_HIFIVE) += start_hifive_unmatched start_hifive_unleashed
 FILE_barebox-hifive-unmatched.img = start_hifive_unmatched.pblb
